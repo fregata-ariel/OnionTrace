@@ -208,6 +208,13 @@ def validate_entry(args, directory, compiler, source):
         if len(compilations) != 1:
             raise ValueError("expected exactly one compiler primary input")
         compilation = compilations[0]
+        if (not isinstance(compilation, dict) or
+                not isinstance(compilation.get("directory"), str) or not compilation["directory"] or
+                not isinstance(compilation.get("file"), str) or not compilation["file"] or
+                not isinstance(compilation.get("arguments"), list) or not compilation["arguments"] or
+                any(not isinstance(arg, str) for arg in compilation["arguments"]) or
+                not compilation["arguments"][0]):
+            raise ValueError("compiler primary input cannot be verified: malformed -MJ record")
         actual_directory = Path(compilation["directory"]).resolve()
         actual_source = absolute(compilation["file"], actual_directory)
         if actual_directory != directory or actual_source != source:

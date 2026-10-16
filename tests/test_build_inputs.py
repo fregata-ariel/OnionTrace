@@ -190,12 +190,15 @@ class BuildInputTests(unittest.TestCase):
 
     def test_primary_input_metadata_and_dependency_membership_are_required(self):
         from onion.build_inputs import run
-        for failure in ("metadata_missing", "source_not_hashed"):
+        for failure in ("metadata_missing", "metadata_malformed", "source_not_hashed"):
             def incomplete_compiler_output(args, cwd=None):
                 result = run(args, cwd)
                 if "-MJ" in args:
                     if failure == "metadata_missing":
                         Path(args[args.index("-MJ") + 1]).unlink()
+                    elif failure == "metadata_malformed":
+                        Path(args[args.index("-MJ") + 1]).write_text(json.dumps({
+                            "directory": str(cwd), "file": str(self.source / "shared.c"), "arguments": []}) + ",\n")
                     else:
                         depfile = Path(args[args.index("-MF") + 1])
                         depfile.write_text("onion: " + shlex.quote(str(self.source / "unrelated.c")) + "\n")
