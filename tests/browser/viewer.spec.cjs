@@ -76,6 +76,14 @@ test('viewer works offline and screenshots are retained as CI evidence',async({p
 test('mobile controls and graph stay within the viewport',async({page},testInfo)=>{
   await page.setViewportSize({width:390,height:844});
   await expect(page.locator('#play')).toBeVisible();
-  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(392);
   await page.screenshot({path:testInfo.outputPath('mobile.png'),fullPage:true});
+  const layout=await page.evaluate(()=>({
+    width:document.documentElement.scrollWidth,
+    blocks:[...document.querySelectorAll('main,main>.panel,.layout,.layout>.panel,.graphbox')].map(element=>({
+      tag:element.tagName,classes:element.className,width:element.getBoundingClientRect().width,
+      right:element.getBoundingClientRect().right
+    }))
+  }));
+  expect(layout.width,JSON.stringify(layout)).toBeLessThanOrEqual(392);
+  expect(await page.locator('.graphbox').evaluate(element=>element.scrollWidth>element.clientWidth)).toBe(true);
 });

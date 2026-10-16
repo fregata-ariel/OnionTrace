@@ -41,7 +41,7 @@ jobs:
           test -s build/compile_commands.json
       - name: Rebuild CFG, run all stages, and test without skips
         run: python scripts/ci.py --cc clang-18 --out out
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
           name: core-python-${{ matrix.python }}
@@ -72,7 +72,7 @@ jobs:
           cmake -S fixture -B build-sanitizers -G Ninja -DCMAKE_C_COMPILER=clang-18 -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer'
           cmake --build build-sanitizers
           ctest --test-dir build-sanitizers --output-on-failure
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
           name: fixture-sanitizers
@@ -109,7 +109,7 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Test actual browser behavior and layout
         run: npm run test:browser
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
           name: viewer-evidence
