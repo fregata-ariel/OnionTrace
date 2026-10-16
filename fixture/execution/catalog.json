@@ -1,0 +1,9 @@
+{
+  "origin": "fixture://oniontrace/execution",
+  "revision": "identity-fixture-v1",
+  "variants": [
+    {"target": "softmodem", "configuration": {"mode": "normal"}, "sources": ["a.c", "b.c"], "defines": []},
+    {"target": "softmodem", "configuration": {"mode": "fast"}, "sources": ["a.c"], "defines": ["-DFAST=1"]},
+    {"target": "uesoftmodem", "configuration": {"mode": "normal"}, "sources": ["a.c"], "defines": []}
+  ]
+}
