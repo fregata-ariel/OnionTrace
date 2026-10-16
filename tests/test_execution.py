@@ -26,18 +26,24 @@ def fixture_structure():
     program = entity("program", origin=catalog["origin"], revision=catalog["revision"])
     for variant in catalog["variants"]:
         target = entity("target", program_id=program, name=variant["target"])
-        build = entity("build", target_id=target, configuration=variant["configuration"])
-        builds.append(build)
+        commands = []
         for source in variant["sources"]:
             contents = (FIXTURE / source).read_bytes()
             digest = "sha256:" + sha256(contents).hexdigest()
-            compilation = entity("compilation", build_id=build, source=source, directory=".",
-                                 compiler="clang-18:test-toolchain", input_digest=digest,
-                                 arguments=["clang-18", "-std=c11", *variant["defines"], "-c", source])
+            commands.append({"source": source, "directory": ".", "compiler": "clang-18:test-toolchain",
+                             "input_digest": digest,
+                             "arguments": ["clang-18", "-std=c11", *variant["defines"], "-c", source]})
+        manifest = json.dumps(commands, sort_keys=True, separators=(",", ":")).encode()
+        configuration = dict(variant["configuration"], manifest_digest="sha256:" + sha256(manifest).hexdigest())
+        build = entity("build", target_id=target, configuration=configuration)
+        builds.append(build)
+        for command in commands:
+            source, digest = command["source"], command["input_digest"]
+            compilation = entity("compilation", build_id=build, **command)
             functions.append(entity("function", compilation_id=compilation,
                                     symbol="c:@F@handler", linkage="internal"))
             locations.append(entity("location", compilation_id=compilation, path=source,
-                                    content_digest=digest, start_offset=0, end_offset=len(contents)))
+                                    content_digest=digest, start_offset=0, end_offset=len((FIXTURE / source).read_bytes())))
     role = entity("thread_role", build_id=builds[0], key="worker@a.c:0")
     queue = entity("queue", build_id=builds[0], key="jobs@a.c:0")
     compilation = next(row for row in entities if row["id"] == functions[0])["identity"]["compilation_id"]
