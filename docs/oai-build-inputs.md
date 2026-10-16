@@ -92,9 +92,18 @@ File APIのソース所属・compileGroupIndexを照合する。File APIの対�
 不明な出力形式、compiler launcher、response file、プラグイン、C/C++以外の言語は黙って通さない。
 現実装の対応範囲はLinuxのCMake Makefiles/Ninjaが出力する`CMakeFiles/<target>.dir`形式。
 別形式・unity build等で照合できない場合は失敗理由を出力する。
+両profileとも直接起動するClangのC/C++を対象とし、genericはOAIの固定版・Clang 18の版指定を外す。
+compile DBの実行体とCMakeCacheの言語別コンパイラを実パスで照合し、launcherや不一致は
+genericでも理由付き`failed`とする。他のcompiler familyは主入力を検証できないため未対応とする。
 
 出力・depfile用の`-c/-o/-MD/-MMD/-MP/-MF/-MT/-MQ/-MJ`のみを検査用に差し替え、
 その他の意味を持つ引数は保持する。`-fsyntax-only -MD`でsystem headerを含む依存を取得する。
+同時にClangの`-MJ`で実際の主入力・cwd・driverを取得し、主入力が1件だけで、
+compile DBの`file`・実行cwd・記録したコンパイラと一致することを検査する。
+主入力そのものが依存一覧に含まれ、その内容のSHA-256を記録できた場合だけ`validated`とする。
+`validation.main_input`と`validation.compiler_path`に照合結果を保存し、cache_keyにも含める。
+別ソース、複数主入力、主入力・driverの照合不能、主入力ハッシュの欠落は`failed`でcache_keyを持たない。
+宣言されたソースを単に`-include`で依存へ加えても、主入力の一致とは扱わない。
 Clangの未知のwarning optionと未使用引数はerrorへ昇格させる。
 生成ヘッダ不足・未知の引数・compiler不在・timeoutは`failed`となり、cache_keyを持たない。
 `ready`は失敗0件かつ検査通過1件以上の場合だけtrue。captureは失敗時も一覧を書き、終了値1を返す。
@@ -120,4 +129,6 @@ manifestにはローカルのパスやパッケージ情報が含まれる。検
 両ターゲット、共有STATIC/OBJECTライブラリ、同一ソースの異なるdefine、除外ライブラリ、
 configure生成ヘッダを含む。`tests/test_build_inputs.py`を必須テストに含め、Clang 18で
 対象選択、条件・生成物・外部依存変更、欠落TU、生成ヘッダ不足、未知の引数とCLI終了値を検証する。
+実際の主入力との差し替え、宣言側ソース変更、強制include、複数/主入力なし、照合情報/ハッシュ不足、
+genericの`env clang ...`拒否も回帰検証する。
 CIの`out/build-inputs`には実際のfixtureのmanifestと対象・除外・失敗一覧も保存する。

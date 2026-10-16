@@ -154,10 +154,15 @@ def owner_for(entry, args, directory, source, model, build, targets):
     return owners[0]
 
 
-def compiler_record(executable, directory):
+def executable_path(executable, directory):
     path = shutil.which(executable) if "/" not in executable else str(absolute(executable, directory))
     if not path:
         raise ValueError(f"compiler not found: {executable}")
+    return Path(path).resolve()
+
+
+def compiler_record(executable, directory):
+    path = str(executable_path(executable, directory))
     version = run([path, "--version"], directory).stdout
     return {**file_record(path), "version": version}
 
@@ -181,15 +186,35 @@ def validation_args(args):
     return result
 
 
-def validate_entry(args, directory, compiler):
+def validate_entry(args, directory, compiler, source):
     flags = validation_args(args)
-    if "clang" in compiler["version"].lower():
-        flags += ["-Werror=unknown-warning-option", "-Werror=unused-command-line-argument",
-                  "-Werror=ignored-optimization-argument"]
+    # The generic profile relaxes OAI's version/repository checks, not driver
+    # identification. Clang's -MJ records the actual primary input; a depfile
+    # alone cannot distinguish a primary source from a forced include.
+    if not re.search(r"clang version \d+\.", compiler["version"]):
+        raise ValueError("unsupported direct compiler: primary-input validation requires Clang")
+    flags += ["-Werror=unknown-warning-option", "-Werror=unused-command-line-argument",
+              "-Werror=ignored-optimization-argument"]
     with tempfile.TemporaryDirectory(prefix="onion-deps-") as temporary:
         depfile = Path(temporary) / "inputs.d"
-        invocation = [compiler["path"], *flags, "-fsyntax-only", "-MD", "-MF", str(depfile), "-MT", "onion"]
+        compilation_file = Path(temporary) / "compilations.json"
+        invocation = [compiler["path"], *flags, "-fsyntax-only", "-MD", "-MF", str(depfile),
+                      "-MT", "onion", "-MJ", str(compilation_file)]
         completed = run(invocation, directory)
+        if not compilation_file.is_file():
+            raise ValueError("compiler primary input cannot be verified: missing -MJ output")
+        fragments = compilation_file.read_text().strip().rstrip(",")
+        compilations = json.loads("[" + fragments + "]")
+        if len(compilations) != 1:
+            raise ValueError("expected exactly one compiler primary input")
+        compilation = compilations[0]
+        actual_directory = Path(compilation["directory"]).resolve()
+        actual_source = absolute(compilation["file"], actual_directory)
+        if actual_directory != directory or actual_source != source:
+            raise ValueError("compiler primary input does not match compile DB file/directory")
+        actual_compiler = executable_path(compilation["arguments"][0], actual_directory)
+        if actual_compiler != Path(compiler["path"]):
+            raise ValueError("compiler launcher unsupported: emitted driver differs from recorded compiler")
         if not depfile.is_file():
             raise ValueError("compiler did not emit dependency file")
         contents = depfile.read_text().replace("\\\n", "")
@@ -199,7 +224,11 @@ def validate_entry(args, directory, compiler):
                                for p in shlex.split(contents[len("onion:"):])})
         if not dependencies:
             raise ValueError("empty dependency inventory")
-        return [file_record(path) for path in dependencies], completed.stderr
+        if str(source) not in dependencies:
+            raise ValueError("compiler primary input missing from dependency inventory")
+        records = [file_record(path) for path in dependencies]
+        main_input = next(row for row in records if row["path"] == str(source))
+        return records, completed.stderr, {"main_input": main_input, "compiler_path": str(actual_compiler)}
 
 
 def git_provenance(source, lock):
@@ -287,6 +316,9 @@ def collect(build, names, *, configuration=None, oai=False, dependency_lock=None
                 continue
             if group["language"] not in ("C", "CXX"):
                 raise ValueError(f"unsupported language: {group['language']}")
+            configured_compiler = cache_values.get("CMAKE_" + group["language"] + "_COMPILER")
+            if not configured_compiler or executable_path(args[0], directory) != executable_path(configured_compiler, build):
+                raise ValueError("compiler launcher or mismatch unsupported: expected CMake's direct compiler")
             compiler_key = (args[0], str(directory))
             if compiler_key not in compilers:
                 compilers[compiler_key] = compiler_record(args[0], directory)
@@ -294,13 +326,13 @@ def collect(build, names, *, configuration=None, oai=False, dependency_lock=None
             row["compiler"] = compiler
             if oai and not re.search(r"clang version 18\.", compiler["version"]):
                 raise ValueError("OAI analysis requires Clang 18")
-            dependencies, diagnostics = validate_entry(args, directory, compiler)
+            dependencies, diagnostics, validation = validate_entry(args, directory, compiler, path)
             row.update(status="validated", reason="syntax and dependencies validated; extraction not run",
-                       dependencies=dependencies, diagnostics=diagnostics)
+                       dependencies=dependencies, diagnostics=diagnostics, validation=validation)
             row["cache_key"] = digest({"context": cache_context, "source": row["source"],
                                        "directory": row["directory"], "arguments": args,
                                        "compiler": compiler, "dependencies": dependencies,
-                                       "target": row["target"]})
+                                       "target": row["target"], "validation": validation})
         except (ValueError, KeyError, OSError, subprocess.SubprocessError) as error:
             row.update(status="failed", reason=str(error))
             if isinstance(error, subprocess.CalledProcessError):

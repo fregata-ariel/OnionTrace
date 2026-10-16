@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
@@ -110,7 +111,6 @@ class BuildInputTests(unittest.TestCase):
         self.assertTrue(any("cannot be matched" in r["reason"] for r in result["entries"]))
 
     def test_arguments_array_preserves_command_conditions(self):
-        import shlex
         before = self.capture()
         def convert(rows):
             for row in rows:
@@ -120,6 +120,102 @@ class BuildInputTests(unittest.TestCase):
         self.assertTrue(after["ready"])
         self.assertEqual([r.get("arguments") for r in before["entries"]],
                          [r.get("arguments") for r in after["entries"]])
+
+    def test_different_primary_input_is_rejected_even_when_declared_source_is_included(self):
+        original = self.db_path.read_text()
+        for form in ("command", "arguments", "forced_include"):
+            with self.subTest(form=form):
+                self.db_path.write_text(original)
+                def replace_source(rows):
+                    entry = rows[0]
+                    args = shlex.split(entry["command"])
+                    args = [str(self.source / "unrelated.c") if a == entry["file"] else a for a in args]
+                    if form == "forced_include":
+                        args += ["-include", entry["file"]]
+                    if form == "command":
+                        entry["command"] = shlex.join(args)
+                    else:
+                        entry["arguments"] = args
+                self.mutate_db(replace_source)
+                result = self.capture()
+                self.assertFalse(result["ready"])
+                row = result["entries"][0]
+                self.assertEqual(row["source"], str(self.source / "shared.c"))
+                self.assertEqual(row["status"], "failed")
+                self.assertIn("primary input does not match", row["reason"])
+                self.assertNotIn("cache_key", row)
+
+    def test_mismatched_command_cannot_hide_declared_source_changes(self):
+        def replace_source(rows):
+            entry = rows[0]
+            entry["arguments"] = [str(self.source / "unrelated.c") if a == entry["file"] else a
+                                  for a in shlex.split(entry["command"])]
+        self.mutate_db(replace_source)
+        before = self.capture()
+        (self.source / "shared.c").write_text("#error declared source must not be ignored\n")
+        after = self.capture()
+        for result in (before, after):
+            self.assertFalse(result["ready"])
+            self.assertEqual(result["entries"][0]["status"], "failed")
+            self.assertNotIn("cache_key", result["entries"][0])
+
+    def test_primary_source_content_is_hashed_and_invalidates_cache(self):
+        before = self.capture()["entries"][0]
+        source = self.source / "shared.c"
+        source.write_text(source.read_text() + "\n/* source changed */\n")
+        after = self.capture()["entries"][0]
+        self.assertEqual(after["status"], "validated")
+        main_input = after["validation"]["main_input"]
+        self.assertEqual(main_input["path"], str(source))
+        self.assertIn(main_input, after["dependencies"])
+        self.assertNotEqual(before["cache_key"], after["cache_key"])
+        self.assertNotEqual(before["validation"]["main_input"]["sha256"], main_input["sha256"])
+
+    def test_multiple_primary_inputs_are_rejected(self):
+        self.mutate_db(lambda rows: rows[0].update(arguments=[*shlex.split(rows[0]["command"]),
+                                                             str(self.source / "unrelated.c")]))
+        result = self.capture()
+        self.assertFalse(result["ready"])
+        self.assertEqual(result["entries"][0]["status"], "failed")
+        self.assertIn("exactly one compiler primary input", result["entries"][0]["reason"])
+        self.assertNotIn("cache_key", result["entries"][0])
+
+    def test_absent_primary_input_is_failed_without_cache_key(self):
+        self.mutate_db(lambda rows: rows[0].update(arguments=[a for a in shlex.split(rows[0]["command"])
+                                                             if a != rows[0]["file"]]))
+        result = self.capture()
+        self.assertFalse(result["ready"])
+        self.assertEqual(result["entries"][0]["status"], "failed")
+        self.assertNotIn("cache_key", result["entries"][0])
+
+    def test_primary_input_metadata_and_dependency_membership_are_required(self):
+        from onion.build_inputs import run
+        for failure in ("metadata_missing", "source_not_hashed"):
+            def incomplete_compiler_output(args, cwd=None):
+                result = run(args, cwd)
+                if "-MJ" in args:
+                    if failure == "metadata_missing":
+                        Path(args[args.index("-MJ") + 1]).unlink()
+                    else:
+                        depfile = Path(args[args.index("-MF") + 1])
+                        depfile.write_text("onion: " + shlex.quote(str(self.source / "unrelated.c")) + "\n")
+                return result
+            with self.subTest(failure=failure), patch("onion.build_inputs.run", side_effect=incomplete_compiler_output):
+                result = self.capture()
+            self.assertFalse(result["ready"])
+            self.assertEqual(result["summary"]["failed"], 6)
+            self.assertTrue(all("cache_key" not in r for r in result["entries"] if r["status"] == "failed"))
+
+    def test_generic_rejects_env_launcher_before_recording_compiler(self):
+        self.mutate_db(lambda rows: rows[0].update(arguments=[shutil.which("env"),
+                                                             *shlex.split(rows[0]["command"])]))
+        result = self.capture()
+        self.assertFalse(result["ready"])
+        self.assertEqual(result["summary"]["failed"], 1)
+        row = result["entries"][0]
+        self.assertIn("compiler launcher", row["reason"])
+        self.assertNotIn("compiler", row)
+        self.assertNotIn("cache_key", row)
 
     def test_cli_writes_failure_inventory_and_returns_nonzero(self):
         (self.build / "generated/config.h").unlink()
