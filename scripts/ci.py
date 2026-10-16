@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -12,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 
 from onion.core import reconstruct, recommend
 from onion.demo import run_demo, render_report
+from onion.build_inputs import query
 
 
 class Tee:
@@ -53,6 +55,14 @@ def main():
     incomplete_view(data, output / 'incomplete-demo.html')
     os.environ['ONION_TEST_SESSION'] = str(output / 'session.json')
     os.environ['ONION_CLANG'] = options.cc
+    manifest_build = output / 'build-inputs/cmake'
+    query(manifest_build)
+    subprocess.run(['cmake', '-S', str(ROOT / 'fixture/compilation'), '-B', str(manifest_build),
+                    '-G', 'Ninja', '-DCMAKE_C_COMPILER=' + options.cc], check=True)
+    subprocess.run(['cmake', '--build', str(manifest_build)], check=True)
+    subprocess.run([sys.executable, '-m', 'onion.build_inputs', 'capture', '--profile', 'generic',
+                    '--build', str(manifest_build), '--target', 'nr-softmodem',
+                    '--target', 'nr-uesoftmodem', '--out', str(output / 'build-inputs')], cwd=ROOT, check=True)
     suite = unittest.defaultTestLoader.discover(str(ROOT / 'tests'), pattern='test_*.py')
     with (output / 'tests.log').open('w') as log:
         result = unittest.TextTestRunner(stream=Tee(sys.stdout, log), verbosity=2).run(suite)

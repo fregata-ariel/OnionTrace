@@ -73,6 +73,7 @@ push（main）、pull request、手動実行でGitHub Actionsが動作します�
 | `onion/cfg.py` | ClangテキストCFGの構造化。将来LibToolingで置換する境界 |
 | `onion/core.py` | 候補経路の再構成、追加地点の推薦、run別根拠の蓄積 |
 | `onion/execution.py` | M1の実行構造・識別子・run証拠のJSON境界と参照検証 |
+| `onion/build_inputs.py` | 固定版OAIの解析入力・CMakeターゲット・コンパイル条件のmanifest |
 | `onion/demo.py` | ビルドから実行・HTML出力までの接続 |
 | `fixture/` | 実スレッド・Queueと明示的な候補プローブ |
 | `viewer/` | 外部依存のないHTML/SVG表示 |
@@ -88,3 +89,7 @@ M1の[実行構造契約](docs/execution-structure.md)では、関数・スレ�
 OAIのCFGは別途取得した場合だけ`python3 -m onion.demo --oai-dump /path/to/cfg --out out`で表示できます。
 外部コーパスの検査は`ONION_OAI_CFG_DIR=/path/to/cfg python3 -m unittest discover -s tests_optional -v`です。
 OAIのソースやCFGダンプは同梱していません。
+
+M1/T2の[解析入力の準備とmanifest](docs/oai-build-inputs.md)では、固定版OAIを独立したcheckoutに
+取得し、SIMU・Clang 18の入力条件、生成ヘッダ、依存、対象・除外・失敗の由来を記録します。
+小規模CMake fixtureは通常CIに含みます。OAI本体の総合検証は後続Issue #11で扱います。

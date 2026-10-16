@@ -98,7 +98,7 @@ jobs:
       - name: Install fixture compiler and Japanese fonts
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang-18 fonts-noto-cjk
+          sudo apt-get install -y --no-install-recommends clang-18 cmake ninja-build fonts-noto-cjk
       - name: Install locked development dependencies
         run: npm ci
       - name: Rebuild fixture and generate viewer inputs
