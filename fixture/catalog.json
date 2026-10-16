@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "function": "process_job",
+  "description": "Real pthread FIFO fixture; three acyclic routes. Cost units are a proxy, not measured nanoseconds.",
+  "sites": [
+    {
+      "id": "work.begin",
+      "symbol": "S_WORK_BEGIN",
+      "label": "Job processing begins",
+      "kind": "anchor",
+      "anchor": true,
+      "estimated_cost": 1,
+      "order": 0
+    },
+    {
+      "id": "work.end",
+      "symbol": "S_WORK_END",
+      "label": "Job processing ends",
+      "kind": "anchor",
+      "anchor": true,
+      "estimated_cost": 1,
+      "order": 1
+    },
+    {
+      "id": "branch.slow",
+      "symbol": "S_BRANCH_SLOW",
+      "label": "Slow branch entered",
+      "kind": "candidate",
+      "anchor": false,
+      "estimated_cost": 1,
+      "order": 2
+    },
+    {
+      "id": "branch.fast",
+      "symbol": "S_BRANCH_FAST",
+      "label": "Fast branch entered",
+      "kind": "candidate",
+      "anchor": false,
+      "estimated_cost": 1,
+      "order": 3
+    },
+    {
+      "id": "retry.ok",
+      "symbol": "S_RETRY_OK",
+      "label": "Retry success branch",
+      "kind": "candidate",
+      "anchor": false,
+      "estimated_cost": 1,
+      "order": 4
+    },
+    {
+      "id": "retry.fail",
+      "symbol": "S_RETRY_FAIL",
+      "label": "Retry failure branch",
+      "kind": "candidate",
+      "anchor": false,
+      "estimated_cost": 1,
+      "order": 5
+    },
+    {
+      "id": "main.begin",
+      "symbol": "S_MAIN_BEGIN",
+      "label": "Main begins",
+      "kind": "lifecycle",
+      "anchor": true,
+      "estimated_cost": 1,
+      "order": 6
+    },
+    {
+      "id": "thread.spawn",
+      "symbol": "S_THREAD_SPAWN",
+      "label": "Worker creation requested",
+      "kind": "lifecycle",
+      "anchor": true,
+      "estimated_cost": 1,
+      "order": 7
+    },
+    {
+      "id": "thread.begin",
+      "symbol": "S_THREAD_BEGIN",
+      "label": "Worker begins",
+      "kind": "lifecycle",
+      "anchor": true,
+      "estimated_cost": 1,
+      "order": 8
+    },
+    {
+      "id": "queue.enqueue",
+      "symbol": "S_QUEUE_ENQUEUE",
+      "label": "Job enqueued under queue lock",
+      "kind": "queue",
+      "anchor": true,
+      "estimated_cost": 1,
+      "order": 9
+    },
+    {
+      "id": "queue.dequeue",
+      "symbol": "S_QUEUE_DEQUEUE",
+      "label": "Job dequeued under queue lock",
+      "kind": "queue",
+      "anchor": true,
+      "estimated_cost": 1,
+      "order": 10
+    },
+    {
+      "id": "thread.end",
+      "symbol": "S_THREAD_END",
+      "label": "Worker ends",
+      "kind": "lifecycle",
+      "anchor": true,
+      "estimated_cost": 1,
+      "order": 11
+    },
+    {
+      "id": "main.end",
+      "symbol": "S_MAIN_END",
+      "label": "Main ends after joining worker",
+      "kind": "lifecycle",
+      "anchor": true,
+      "estimated_cost": 1,
+      "order": 12
+    }
+  ]
+}
