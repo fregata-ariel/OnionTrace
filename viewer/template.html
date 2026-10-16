@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OnionTrace — 段階的な実動作の再構成</title>
+<style>
+:root{--ink:#172e39;--muted:#59717c;--line:#d3dfe2;--paper:#f3f6f5;--blue:#077d9d;--amber:#b37b13;--red:#a34040}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.65 system-ui,"Noto Sans CJK JP",sans-serif}header{padding:26px 32px 22px;background:#142f3a;color:#f3fafb}header .eyebrow{color:#89ced3;letter-spacing:.15em;font-size:11px;font-weight:700}h1{font-size:26px;line-height:1.35;margin:8px 0}header p{margin:4px 0;color:#b8cdd4;font-size:13px}main{max-width:1520px;margin:auto;padding:22px 28px 50px}button,select,input{font:inherit}button,select{border:1px solid #bbcdd2;border-radius:6px;padding:7px 11px;color:var(--ink);background:#fff}button{cursor:pointer}button:hover{background:#e6f0f2}button.active{background:var(--ink);border-color:var(--ink);color:white}button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid #00a6cd;outline-offset:3px}.toolbar,.stagebar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.toolbar{justify-content:space-between;margin-bottom:15px}.stagebar button{min-width:145px;text-align:left}.stagebar small{display:block;font-size:11px;opacity:.8}.panel{background:white;border:1px solid var(--line);border-radius:9px;padding:18px;margin-top:16px}h2{font-size:16px;margin:0 0 10px}p{margin:7px 0}.muted{color:var(--muted)}.tiny{font-size:12px}.notice{border-left:3px solid #8cafba;background:#e8f0f2;padding:10px 14px;font-size:13px;margin-top:12px}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0}.stat{background:white;border:1px solid var(--line);border-radius:8px;padding:13px 16px}.stat .value{display:block;font-size:23px;line-height:1.5;font-weight:700}.stat .label{color:var(--muted);font-size:12px}.layout{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(300px,1fr);gap:16px}.layout>.panel{margin-top:0}.controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.controls input[type=range]{flex:1;min-width:140px}.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:11px;margin:10px 0}.legend span:before{content:"";display:inline-block;width:10px;height:10px;margin-right:5px;background:#eef2f3;border:1px solid #9eb1b8}.legend .observed:before{background:#d7f1f6;border-color:var(--blue)}.legend .inferred:before{background:#fff3d6;border-color:var(--amber)}.graphbox{overflow:auto;max-height:610px;border:1px solid #e1e8ea;border-radius:6px;background:linear-gradient(#fff,#f8faf9)}svg.graph{display:block;min-width:100%;font-family:inherit}.node{cursor:pointer}.node rect{fill:#f4f7f7;stroke:#b5c5cb;stroke-width:1.2}.node.observed rect{fill:#def3f7;stroke:var(--blue);stroke-width:2}.node.inferred rect{fill:#fff4dd;stroke:#c99535}.node.pruned{opacity:.35}.node.selected rect{stroke:#dc621b;stroke-width:3}.node text{font-size:12px;fill:var(--ink)}.edge{stroke:#a7bac2;fill:none;stroke-width:1.3;stroke-dasharray:5 4}.edge.inferred{stroke:#bd8a28;stroke-width:2;stroke-dasharray:4 3}.details{white-space:pre-wrap;overflow:auto;max-height:270px;background:#f5f8f8;border:1px solid var(--line);border-radius:5px;padding:12px;font:11px/1.6 ui-monospace,monospace}.chips{display:flex;gap:5px;flex-wrap:wrap}.chip{font:11px ui-monospace,monospace;padding:5px 7px;background:#eaf0f2;border-radius:4px}.good{color:#08697b}.warn{color:#99600a}.bad{color:var(--red)}table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;border-bottom:1px solid #e0e8eb;padding:8px 9px;vertical-align:top}th{color:#5a727d;font-weight:600}tr.highlight{background:#e8f5f7}tr[data-job]{cursor:pointer}tbody tr[data-job]:hover{background:#f0f7f8}.timeline{position:relative;height:100px;margin-top:12px}.lane{height:43px;margin-left:75px;position:relative;border-bottom:1px solid #dae5e8}.lane label{position:absolute;left:-72px;top:8px;font:12px ui-monospace,monospace}.tick{position:absolute;top:8px;width:8px;height:24px;background:#198da6;border-radius:2px;transform:translateX(-50%);border:0;padding:0}.tick:hover,.tick.focus{background:#e3772a}.tick.future{opacity:.15}.tick.other{background:#99adb5}.scroll{overflow:auto;max-height:300px}.footer{font-size:12px;color:var(--muted);margin-top:20px}.view-static .dynamic-only{display:none}.view-runtime .static-only{display:none}.hidden{display:none!important}@media(max-width:900px){main{padding:15px}.layout{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}header{padding:20px}.stagebar button{min-width:100px}h1{font-size:22px}}
+</style>
+<header><div class="eyebrow">ONION / OBSERVABILITY PROTOTYPE 0.1</div><h1>観測を重ね、実動作の内部を開く</h1><p>実スレッド・Queueの小規模試作 / Clang CFGに観測結果を重ね、残る経路候補を次の計測へ渡す</p></header>
+<main class="view-runtime" id="app">
+<div class="toolbar"><div class="stagebar" id="stages"></div><label>表示対象 <select id="mode"><option value="fixture">Fixture：実行＋CFG</option></select></label></div>
+<div class="notice" id="context"></div>
+<div class="stats" id="stats"></div>
+<div class="panel dynamic-only" style="margin-bottom:16px"><div class="controls"><label>job <select id="job"></select></label><button id="play">再生</button><input id="cursor" aria-label="観測イベントの再生位置" type="range" min="0" value="0"><span id="position" class="tiny muted"></span><button id="end">末尾</button></div><div class="timeline" id="timeline"></div><p class="tiny muted">共通の単調時計による表示順です。スレッド間の因果関係はjob付きQueue受渡しから判定します。未表示の未来イベントを推論に使いません。</p></div>
+<div class="layout"><section class="panel"><h2 id="graph-title">process_job / CFG</h2><div class="legend"><span class="observed">このrunで記録した地点</span><span class="inferred">完全な証跡とCFGから共通経路を推定</span><span>静的候補／未観測</span></div><div id="graph" class="graphbox"></div><p class="tiny muted">矢印は静的CFGです。基本ブロック全体を直接観測したという意味ではありません。ブロックを選ぶとClang出力を確認できます。</p></section>
+<aside class="panel"><h2>選択したjobの観測</h2><div id="job-summary"></div><div id="site-list" class="chips"></div><h2 style="margin-top:20px">次に測る点</h2><div id="recommendation"></div><h2 style="margin-top:20px">選択ブロック</h2><div id="details" class="details">ブロックを選択してください。</div></aside></div>
+<section class="panel dynamic-only"><h2>main → thread main → job の骨格</h2><div id="skeleton" class="tiny"></div><div class="scroll"><table><thead><tr><th>job</th><th>状態</th><th>候補経路</th><th>処理区間</th><th>Queue対応</th></tr></thead><tbody id="jobtable"></tbody></table></div></section>
+<section class="panel dynamic-only"><h2>段階をまたぐ蓄積</h2><p class="muted tiny">観測の境界を残して内部の識別点を追加しています。各行は別runです。job番号が同じでも、一つの実行履歴には接合しません。</p><table><thead><tr><th>段階 / run</th><th>内部に追加した地点</th><th>候補が一つのjob</th><th>まだ複数候補</th><th>欠落</th></tr></thead><tbody id="history"></tbody></table><p class="tiny muted" id="cumulative"></p></section>
+<section class="panel"><h2>この試作で確認する範囲</h2><ul id="limits" class="tiny muted"></ul></section><div class="footer">外部通信・外部ライブラリ不要。各段階のplan／trace／analysisは生成先ディレクトリに保存されます。</div>
+</main>
+<script>
+'use strict';
+const DATA=/*__ONION_DATA__*/null;
+const $=id=>document.getElementById(id),NS='http://www.w3.org/2000/svg';
+const state={stage:0,job:0,cursor:0,mode:'fixture',selected:null,timer:null};
+const statusLabel={unique:'モデル内で1経路',ambiguous:'内部経路が未確定',incomplete:'観測が不完全',inconsistent:'モデルと証跡が不整合'};
+function el(tag,text,cls){const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;}
+function svg(tag,attrs={},text){const e=document.createElementNS(NS,tag);for(const [k,v] of Object.entries(attrs))e.setAttribute(k,String(v));if(text!==undefined)e.textContent=text;return e;}
+function current(){return DATA.stages[state.stage];}
+function frame(){return current().frames[Math.min(state.cursor,current().frames.length-1)];}
+function picked(){return frame().jobs.find(j=>j.job===state.job);}
+function metric(label,value){const e=el('div',undefined,'stat');e.append(el('span',value,'value'),el('span',label,'label'));return e;}
+function stop(){if(state.timer)clearInterval(state.timer);state.timer=null;$('play').textContent='再生';}
+function selectStage(index){stop();state.stage=index;state.cursor=current().trace.events.length;state.selected=null;$('cursor').max=state.cursor;$('cursor').value=state.cursor;const jobs=current().analysis.jobs;$('job').replaceChildren(...jobs.map(j=>{const o=el('option',String(j.job));o.value=j.job;return o;}));if(!jobs.some(j=>j.job===state.job))state.job=jobs[0]?.job??0;$('job').value=state.job;render();}
+function getModel(){return state.mode==='fixture'?DATA.model:DATA.oai_cfg[Number(state.mode.split(':')[1])];}
+function renderGraph(){const model=getModel(),isFixture=state.mode==='fixture',job=isFixture?picked():null;
+ const nodes=model.nodes,edges=model.edges,byId=new Map(nodes.map(n=>[n.id,n]));
+ const starts=nodes.filter(n=>n.entry).map(n=>n.id);if(!starts.length)starts.push(model.region?.entry||nodes[0]?.id);
+ const ranks=new Map(),queue=[];starts.forEach(n=>{ranks.set(n,0);queue.push(n);});
+ for(let i=0;i<queue.length;i++){const id=queue[i];for(const e of edges.filter(e=>e.source===id)){if(byId.has(e.target)&&!ranks.has(e.target)){ranks.set(e.target,ranks.get(id)+1);queue.push(e.target);}}}
+ // Acyclic regions use longest-path layers so joins stay below every predecessor.
+ const indegree=new Map(nodes.map(n=>[n.id,0])),longest=new Map(nodes.map(n=>[n.id,0]));
+ edges.forEach(e=>indegree.set(e.target,(indegree.get(e.target)||0)+1));
+ const ready=nodes.filter(n=>indegree.get(n.id)===0).map(n=>n.id);let visited=0;
+ for(let i=0;i<ready.length;i++){const id=ready[i];visited++;for(const e of edges.filter(e=>e.source===id)){longest.set(e.target,Math.max(longest.get(e.target),longest.get(id)+1));indegree.set(e.target,indegree.get(e.target)-1);if(indegree.get(e.target)===0)ready.push(e.target);}}
+ if(visited===nodes.length)for(const [id,rank]of longest)ranks.set(id,rank);
+ const maxRank=Math.max(0,...ranks.values());nodes.forEach(n=>{if(!ranks.has(n.id))ranks.set(n.id,maxRank+1);});
+ const layers=new Map();for(const n of nodes){const r=ranks.get(n.id);if(!layers.has(r))layers.set(r,[]);layers.get(r).push(n);}
+ const ncols=Math.max(1,...[...layers.values()].map(a=>a.length)),width=Math.max(660,ncols*235+50),height=(Math.max(...ranks.values())+1)*112+35,pos=new Map();
+ for(const [r,items]of layers)items.forEach((n,i)=>pos.set(n.id,{x:(width-items.length*235)/2+i*235+8,y:18+r*112}));
+ const root=svg('svg',{class:'graph',viewBox:`0 0 ${width} ${height}`,width,height,role:'img','aria-label':isFixture?'観測状態を重ねたprocess_jobのCFG':'OAIの静的CFG'});
+ const defs=svg('defs'),marker=svg('marker',{id:'arrow',viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:6,markerHeight:6,orient:'auto-start-reverse'});marker.append(svg('path',{d:'M 0 0 L 10 5 L 0 10 z',fill:'#9aadb6'}));defs.append(marker);root.append(defs);
+ const paths=job?.candidate_paths||[],possible=new Set(paths.flat()),shared=paths.length?new Set(paths[0].filter(n=>paths.every(p=>p.includes(n)))):new Set();
+ const observed=new Set(job?.observed_sites||[]),complete=job?.absence_usable&&['unique','ambiguous'].includes(job?.status);
+ for(const e of edges){const a=pos.get(e.source),b=pos.get(e.target);if(!a||!b)continue;const x1=a.x+105,y1=a.y+65,x2=b.x+105,y2=b.y;
+ const common=complete&&paths.length&&paths.every(p=>p.some((n,i)=>n===e.source&&p[i+1]===e.target));
+ let d;
+ if(y2-y1>80){const right=x1>=width/2,channel=right?width-14:14,ax=right?a.x+210:a.x,bx=right?b.x+210:b.x;d=`M${ax},${a.y+32} C${channel},${a.y+32} ${channel},${a.y+42} ${channel},${a.y+60} L${channel},${b.y+10} Q${channel},${b.y+32} ${bx},${b.y+32}`;}
+ else d=y2>y1?`M${x1},${y1} C${x1},${y1+23} ${x2},${y2-23} ${x2},${y2}`:`M${a.x+210},${a.y+30} C${a.x+240},${a.y+30} ${b.x+240},${b.y+30} ${b.x+210},${b.y+30}`;
+ root.append(svg('path',{d,class:'edge'+(common?' inferred':''),'marker-end':'url(#arrow)'}));}
+ for(const n of nodes){const p=pos.get(n.id),sites=n.sites||[],obs=sites.some(s=>observed.has(s)),inferred=!obs&&complete&&shared.has(n.id),pruned=isFixture&&paths.length&&!possible.has(n.id)&&!n.entry&&!n.exit;
+ const g=svg('g',{class:`node${obs?' observed':''}${inferred?' inferred':''}${pruned?' pruned':''}${state.selected===n.id?' selected':''}`,transform:`translate(${p.x},${p.y})`,tabindex:0,role:'button','aria-label':n.clang_id||n.id});g.append(svg('rect',{width:210,height:65,rx:6}));
+ const title=n.clang_id||n.id.split(':').pop();g.append(svg('text',{x:12,y:20,'font-weight':700},title+(n.entry?' / ENTRY':n.exit?' / EXIT':'')));
+ const label=sites.join(' · ')||n.terminator||n.label||'CFG block';g.append(svg('text',{x:12,y:40},String(label).slice(0,29)));g.append(svg('title',{},[n.id,...sites,n.text||''].join('\n')));
+ const choose=()=>{state.selected=n.id;$('details').textContent=n.text||JSON.stringify(n,null,2);renderGraph();};g.addEventListener('click',choose);g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose();}});root.append(g);}
+ $('graph').replaceChildren(root);
+}
+function renderTimeline(){const events=current().trace.events,min=Math.min(...events.map(e=>e.timestamp_ns)),max=Math.max(...events.map(e=>e.timestamp_ns)),span=Math.max(max-min,1);$('timeline').replaceChildren();for(const thread of ['main','worker']){const lane=el('div',undefined,'lane');lane.append(el('label',thread));events.forEach((e,i)=>{if(e.thread!==thread)return;const tick=el('button',undefined,`tick${i>=state.cursor?' future':''}${e.job!==state.job?' other':''}`);tick.style.left=`${(e.timestamp_ns-min)/span*100}%`;tick.title=`${i+1}: ${e.site} / job ${e.job} / +${((e.timestamp_ns-min)/1000).toFixed(1)} µs`;tick.setAttribute('aria-label',tick.title);tick.onclick=()=>{stop();state.cursor=i+1;$('cursor').value=state.cursor;if(e.job>=0){state.job=e.job;$('job').value=e.job;}render();};lane.append(tick);});$('timeline').append(lane);}}
+function render(){const s=current(),isFixture=state.mode==='fixture',job=picked(),f=frame();$('app').className=isFixture?'view-runtime':'view-static';
+ [...$('stages').children].forEach((b,i)=>b.classList.toggle('active',i===state.stage));
+ $('context').textContent=isFixture?`実行証拠：${s.trace.run_id} / ${s.plan.plan_id} / seed ${s.seed}。各段階は別の実行です。OAIの実行記録ではありません。`:`OAI ${getModel().source_tag||"出典commit未確認"} / ${getModel().name} の静的CFG。実行証跡は重ねていません。`;
+ const observedCount=job?.observed_sites?.length||0;
+ $('stats').replaceChildren(...(isFixture?[metric('残る経路候補',job?.candidate_count??'—'),metric('このjobの観測イベント',observedCount),metric('有効な内部識別点',s.plan.enabled_sites.filter(x=>!s.plan.anchor_sites.includes(x)).length),metric('欠落イベント',s.trace.dropped)]:[metric('関数',getModel().name),metric('基本ブロック',getModel().nodes.length),metric('静的遷移',getModel().edges.length),metric('実行観測','なし')]));
+ $('graph-title').textContent=`${getModel().function||getModel().name||'process_job'} / ${isFixture?'実行を重ねたCFG':'静的CFG'}`;
+ $('position').textContent=`${state.cursor} / ${s.trace.events.length} events`;
+ $('job-summary').replaceChildren(el('p',isFixture?(job?statusLabel[job.status]||job.status:'このjobの観測はまだありません。'):'OAI実行イベント未取得',job?.status==='unique'?'good':'warn'));
+ if(isFixture&&job)$('job-summary').append(el('p',`区間時間：${job.elapsed_ns==null?'未確定':(job.elapsed_ns/1000).toFixed(2)+' µs'}。計測機構の負荷を含みます。`,'tiny muted'));
+ $('site-list').replaceChildren(...(isFixture?(job?.observed_sites||[]).map(x=>el('span',x,'chip')):[]));
+ $('recommendation').replaceChildren();
+ if(!isFixture)$('recommendation').append(el('p','静的な取込確認です。OAI用意味定義とプローブ対応付けは次段階で接続します。','tiny muted'));
+ else if(state.cursor<s.trace.events.length)$('recommendation').append(el('p','再生途中：この時点の不完全な証跡では次の計画を確定しません。','tiny muted'));
+ else{const added=s.next_plan.enabled_sites.filter(x=>!s.plan.enabled_sites.includes(x));$('recommendation').append(el('p',added.length?added.join(', '):(['incomplete','inconsistent'].includes(s.analysis.status)?'観測またはモデルが不完全です。追加計測の推薦を保留しています。':s.analysis.jobs.some(j=>j.candidate_count>1)?'曖昧さは残っています。現在の候補地点では区別できません。':'現在のモデル内では追加識別点は不要です。'),added.length?'good':'muted'));$('recommendation').append(el('p','選択基準：残る候補の組を分ける効果 ÷ 相対コスト。入口・出口と前段階の地点を維持します。','tiny muted'));const scores=s.next_plan.rationale?.candidate_scores;if(scores){const pre=el('details');pre.append(el('summary','推薦の根拠'));pre.append(el('pre',JSON.stringify(scores,null,2),'details'));$('recommendation').append(pre);}}
+ $('jobtable').replaceChildren(...f.jobs.map(j=>{const tr=el('tr');tr.dataset.job=j.job;if(j.job===state.job)tr.className='highlight';const transfer=s.analysis.transfers.find(t=>t.job===j.job);[j.job,statusLabel[j.status]||j.status,j.candidate_count,j.elapsed_ns==null?'—':(j.elapsed_ns/1000).toFixed(2)+' µs',state.cursor===s.trace.events.length?(transfer?.status||'未対応'):'再生途中'].forEach(x=>tr.append(el('td',String(x))));tr.onclick=()=>{state.job=j.job;$('job').value=j.job;render();};return tr;}));
+ const visible=s.trace.events.slice(0,state.cursor),life=visible.filter(e=>e.job<0);$('skeleton').textContent=life.map(e=>`${e.thread}: ${e.site}`).join(' → ')||'まだ観測イベントがありません。';
+ renderGraph();if(isFixture)renderTimeline();
+}
+DATA.stages.forEach((s,i)=>{const b=el('button',`段階 ${i}`);b.append(el('small',i===0?'入口・出口':`＋${s.plan.enabled_sites.filter(x=>!DATA.stages[i-1].plan.enabled_sites.includes(x)).join(', ')||'追加なし'}`));b.onclick=()=>selectStage(i);$('stages').append(b);});
+DATA.oai_cfg.forEach((m,i)=>{const o=el('option',`OAI：${m.name}（静的）`);o.value=`oai:${i}`;$('mode').append(o);});
+$('mode').onchange=()=>{stop();state.mode=$('mode').value;state.selected=null;$('details').textContent='ブロックを選択してください。';render();};$('job').onchange=()=>{state.job=Number($('job').value);render();};$('cursor').oninput=()=>{stop();state.cursor=Number($('cursor').value);render();};$('end').onclick=()=>{stop();state.cursor=current().trace.events.length;$('cursor').value=state.cursor;render();};$('play').onclick=()=>{if(state.timer){stop();return;}if(state.cursor>=current().trace.events.length)state.cursor=0;$('play').textContent='停止';state.timer=setInterval(()=>{state.cursor++;$('cursor').value=state.cursor;render();if(state.cursor>=current().trace.events.length)stop();},230);};
+$('history').replaceChildren(...DATA.stages.map((s,i)=>{const tr=el('tr'),added=s.plan.enabled_sites.filter(x=>!s.plan.anchor_sites.includes(x));[`${i} / ${s.trace.run_id}`,added.join(', ')||'なし',s.analysis.jobs.filter(j=>j.status==='unique').length,s.analysis.jobs.filter(j=>j.status==='ambiguous').length,s.trace.dropped].forEach(x=>tr.append(el('td',String(x))));return tr;}));
+$('cumulative').textContent=`累積モデルは ${DATA.stages.length} run の根拠を保持します。保存形式では各接続にrun・job・planの出典が付きます。`;
+$('limits').replaceChildren(...DATA.limits.map(x=>el('li',x)));selectStage(0);
+</script>
+</html>

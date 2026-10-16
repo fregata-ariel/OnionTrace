@@ -1,0 +1,16 @@
+{
+  "name": "oniontrace",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Developer checks for staged execution reconstruction; the generated viewer is dependency-free",
+  "scripts": {
+    "test:dom": "node tests/check_dom.cjs out/onion-demo.html out/qa-dom",
+    "test:browser": "playwright test",
+    "test": "npm run test:dom && npm run test:browser"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@resvg/resvg-js": "2.6.2",
+    "jsdom": "30.1.3"
+  }
+}

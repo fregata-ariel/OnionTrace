@@ -1,0 +1,20 @@
+const {defineConfig}=require('@playwright/test');
+module.exports=defineConfig({
+  testDir:'./tests/browser',
+  fullyParallel:false,
+  workers:1,
+  retries:0,
+  timeout:30000,
+  globalTimeout:180000,
+  expect:{timeout:5000},
+  outputDir:'test-results',
+  reporter:[['list'],['html',{outputFolder:'playwright-report',open:'never'}]],
+  use:{
+    browserName:'chromium',
+    headless:true,
+    viewport:{width:1440,height:1100},
+    trace:'retain-on-failure',
+    screenshot:'only-on-failure',
+    ...(process.env.CHROME_EXECUTABLE?{launchOptions:{executablePath:process.env.CHROME_EXECUTABLE}}:{})
+  }
+});
