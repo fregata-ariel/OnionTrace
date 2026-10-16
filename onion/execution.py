@@ -146,13 +146,16 @@ def make_relation(kind, source, target, resolution, evidence):
 def _relation_shape(relation):
     _fields(relation, {"kind", "source", "target", "resolution", "evidence"})
     _choice(relation["kind"], RELATION_TYPES)
-    _text(relation["source"])
     resolution = _choice(relation["resolution"], {"resolved", "candidate", "unresolved"})
+    endpoints = (relation["source"], relation["target"])
     if resolution == "unresolved":
-        if relation["target"] is not None:
-            raise ValueError("unresolved target must be null")
-    else:
-        _text(relation["target"])
+        if sum(endpoint is None for endpoint in endpoints) != 1:
+            raise ValueError("unresolved relation requires exactly one null endpoint")
+    elif any(endpoint is None for endpoint in endpoints):
+        raise ValueError("resolved/candidate relation requires both endpoints")
+    for endpoint in endpoints:
+        if endpoint is not None:
+            _text(endpoint)
     evidence = relation["evidence"]
     _fields(evidence, {"location_ids", "conditions", "method", "reason"})
     locations = _array(evidence["location_ids"])
@@ -222,6 +225,12 @@ def _build(index, entity):
     return None
 
 
+def _relation_build(index, relation):
+    # Shape/reference validation guarantees at least one well-typed endpoint.
+    endpoint = relation["source"] if relation["source"] is not None else relation["target"]
+    return _build(index, index[endpoint])
+
+
 def validate_structure(structure):
     """Reject malformed/dangling/ill-typed/cross-build static declarations.
 
@@ -251,11 +260,12 @@ def validate_structure(structure):
         if relation["id"] != _identifier("relation", payload):
             raise ValueError("relation ID does not match claim")
         source_kinds, target_kinds = RELATION_TYPES[relation["kind"]]
-        source = _ref(entities, relation["source"], source_kinds)
-        build = _build(entities, source)
-        if relation["target"] is not None:
-            target = _ref(entities, relation["target"], target_kinds)
-            if _build(entities, target) != build:
+        known_endpoints = [_ref(entities, relation[field], kinds)
+                           for field, kinds in (("source", source_kinds), ("target", target_kinds))
+                           if relation[field] is not None]
+        build = _relation_build(entities, relation)
+        for endpoint in known_endpoints:
+            if _build(entities, endpoint) != build:
                 raise ValueError("relation crosses builds")
         for location_id in relation["evidence"]["location_ids"]:
             location = _ref(entities, location_id, {"location"})
@@ -312,7 +322,7 @@ def validate_run(structure, run, trace):
         relation = relations.get(_text(key))
         if relation is None:
             raise ValueError("unknown run relation reference")
-        if _build(entities, entities[relation["source"]]) != run["build_id"]:
+        if _relation_build(entities, relation) != run["build_id"]:
             raise ValueError("run relation crosses builds")
         return relation
 
@@ -324,7 +334,7 @@ def validate_run(structure, run, trace):
         if key not in events or events[key].get("relation_id") != relation["id"]:
             raise ValueError("direct observation requires matching raw relation event")
         if relation["resolution"] == "unresolved":
-            raise ValueError("unknown target cannot be a directly observed connection")
+            raise ValueError("unresolved endpoint cannot be a directly observed connection")
         claim = (relation["id"], key)
         if claim in seen:
             raise ValueError("duplicate observation")

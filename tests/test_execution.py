@@ -59,6 +59,8 @@ def fixture_structure():
     for resolution, target in (("candidate", functions[1]), ("unresolved", None)):
         relations.append(make_relation("calls", functions[0], target, resolution,
                                        dict(evidence, reason="function pointer target is not proven")))
+    relations.append(make_relation("dequeues", None, functions[1], "unresolved",
+                                   dict(evidence, location_ids=[locations[1]], reason="queue alias could not be resolved")))
     return make_structure(entities, relations)
 
 
@@ -137,7 +139,7 @@ class StructureTests(unittest.TestCase):
 
     def test_unknown_target_is_diagnostic_but_dangling_target_is_invalid(self):
         diagnostics = validate_structure(self.structure)
-        self.assertEqual(len(diagnostics), 2)
+        self.assertEqual(len(diagnostics), 3)
         self.assertTrue(all(row["reason"] for row in diagnostics))
         with self.assertRaisesRegex(ValueError, "unknown reference"):
             make_structure(self.entities, [self.relation_with(target="function:missing")])
@@ -207,6 +209,49 @@ class StructureTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_structure(self.structure)
 
+    def test_unknown_queue_source_retains_consumer_location_and_diagnostic(self):
+        relation = next(row for row in self.structure["relations"] if row["kind"] == "dequeues" and row["source"] is None)
+        consumer = next(row for row in self.entities if row["id"] == relation["target"])
+        self.assertEqual(consumer["kind"], "function")
+        self.assertTrue(relation["evidence"]["location_ids"])
+        diagnostic = next(row for row in validate_structure(self.structure) if row["relation_id"] == relation["id"])
+        self.assertEqual(diagnostic["resolution"], "unresolved")
+        self.assertEqual(diagnostic["reason"], "queue alias could not be resolved")
+        restored = json.loads(json.dumps(self.structure))
+        validate_structure(restored)
+        self.assertIn(relation, restored["relations"])
+        self.assertEqual(sum(row["kind"] == "queue" for row in self.entities), 1)
+
+    def test_unknown_source_still_rejects_bad_known_endpoints_and_fake_sources(self):
+        relation = next(row for row in self.structure["relations"] if row["kind"] == "dequeues" and row["source"] is None)
+        values = {key: value for key, value in relation.items() if key != "id"}
+        queue = next(row["id"] for row in self.entities if row["kind"] == "queue")
+        for changes in ({"target": "function:missing"}, {"target": queue}, {"source": "queue:missing", "resolution": "candidate"}):
+            with self.subTest(changes=changes), self.assertRaisesRegex(ValueError, "unknown reference or wrong entity type"):
+                make_structure(self.entities, [make_relation(**dict(values, **changes))])
+
+    def test_unresolved_requires_exactly_one_unknown_endpoint_and_reason(self):
+        relation = next(row for row in self.structure["relations"] if row["kind"] == "dequeues" and row["source"] is None)
+        values = {key: value for key, value in relation.items() if key != "id"}
+        for changes in ({"target": None}, {"resolution": "resolved"}, {"resolution": "candidate"},
+                        {"source": ""}, {"evidence": dict(relation["evidence"], reason=None)}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                make_relation(**dict(values, **changes))
+
+    def test_unknown_source_evidence_must_match_known_consumers_build(self):
+        relation = next(row for row in self.structure["relations"] if row["kind"] == "dequeues" and row["source"] is None)
+        values = {key: value for key, value in relation.items() if key != "id"}
+        own_locations = relation["evidence"]["location_ids"]
+        consumer = next(row for row in self.entities if row["id"] == relation["target"])
+        own_compilation = consumer["identity"]["compilation_id"]
+        own_build = next(row["identity"]["build_id"] for row in self.entities if row["id"] == own_compilation)
+        foreign_compilations = {row["id"] for row in self.entities if row["kind"] == "compilation" and row["identity"]["build_id"] != own_build}
+        location = next(row["id"] for row in self.entities if row["kind"] == "location" and row["identity"]["compilation_id"] in foreign_compilations)
+        self.assertNotIn(location, own_locations)
+        changed = dict(values, evidence=dict(relation["evidence"], location_ids=[location]))
+        with self.assertRaisesRegex(ValueError, "evidence crosses builds"):
+            make_structure(self.entities, [make_relation(**changed)])
+
 
 class RunEvidenceTests(unittest.TestCase):
     def setUp(self):
@@ -243,7 +288,7 @@ class RunEvidenceTests(unittest.TestCase):
         self.assertEqual(relation["resolution"], "candidate")
 
     def test_unknown_endpoint_or_inference_cannot_become_direct_observation(self):
-        relation = next(row for row in self.structure["relations"] if row["resolution"] == "unresolved")
+        relation = next(row for row in self.structure["relations"] if row["resolution"] == "unresolved" and row["target"] is None)
         run = copy.deepcopy(self.run)
         run["inferences"][0]["basis"] = "direct_observation"
         with self.assertRaises(ValueError):
@@ -251,8 +296,33 @@ class RunEvidenceTests(unittest.TestCase):
         self.run["inferences"] = []
         self.run["observations"] = [{"relation_id": relation["id"], "event_ref": {"thread": "worker-instance-0", "thread_seq": 0}}]
         self.trace["events"][0]["relation_id"] = relation["id"]
-        with self.assertRaisesRegex(ValueError, "unknown target"):
+        with self.assertRaisesRegex(ValueError, "unresolved endpoint"):
             validate_run(self.structure, self.run, self.trace)
+
+    def test_unknown_queue_source_remains_candidate_in_run_and_accumulation(self):
+        relation = next(row for row in self.structure["relations"] if row["kind"] == "dequeues" and row["source"] is None)
+        self.run["inferences"][0].update(relation_id=relation["id"], basis="candidate_only")
+        validate_run(self.structure, self.run, self.trace)
+        before = copy.deepcopy(self.structure)
+        result = accumulate_execution(self.structure, [(self.run, self.trace)])
+        self.assertEqual(result["relations"][0]["relation_id"], relation["id"])
+        self.assertEqual(result["relations"][0]["support"][0]["basis"], "candidate_only")
+        self.assertEqual(self.structure, before)
+        other_build = next(row["id"] for row in self.structure["entities"] if row["kind"] == "build" and row["id"] != self.run["build_id"])
+        self.run["build_id"] = self.trace["build_id"] = other_build
+        with self.assertRaisesRegex(ValueError, "run relation crosses builds"):
+            validate_run(self.structure, self.run, self.trace)
+
+    def test_unknown_queue_source_cannot_be_observed_or_unique_even_with_raw_event(self):
+        relation = next(row for row in self.structure["relations"] if row["kind"] == "dequeues" and row["source"] is None)
+        self.run["inferences"][0]["relation_id"] = relation["id"]
+        self.trace["events"][0]["relation_id"] = relation["id"]
+        with self.assertRaisesRegex(ValueError, "model uniqueness"):
+            accumulate_execution(self.structure, [(self.run, self.trace)])
+        self.run["observations"] = [{"relation_id": relation["id"], "event_ref": self.run["inferences"][0]["event_refs"][0]}]
+        self.run["inferences"] = []
+        with self.assertRaisesRegex(ValueError, "unresolved endpoint"):
+            accumulate_execution(self.structure, [(self.run, self.trace)])
 
     def test_multiple_runs_retain_plan_and_event_provenance_without_timeline(self):
         other, trace = fixture_run(self.structure, "run-1", "plan-1")

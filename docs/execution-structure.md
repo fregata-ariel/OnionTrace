@@ -119,7 +119,7 @@ Placeholders above illustrate shape, not valid content hashes.
 | `invokes` | function or thread_role | callback | Invokes a callback slot |
 | `binds` | callback | function | Slot has this possible/resolved function binding |
 
-Endpoints and evidence locations must belong to the same build. Different
+Known endpoints and evidence locations must belong to the same build. Different
 compilations within a build are allowed; cross-TU resolution is not implied by
 this permission. Evidence needs at least one distinct source location and a
 named/versioned analysis method. `conditions` records prerequisites such as
@@ -130,13 +130,27 @@ execution. Multiple conditions/locations retain their declared order.
 
 Resolution semantics:
 
-- `resolved`: non-null, well-typed target, `reason: null`. The static analysis
-  resolved this endpoint under its stated conditions. It does not mean it ran.
-- `candidate`: one non-null possible target plus a nonempty reason explaining
-  uncertainty. Alternative candidates are separate relations with their own
-  provenance; they do not imply coverage of every possible target.
-- `unresolved`: `target: null` plus a nonempty reason. The expected target type
-  still follows from the relation kind. No fake function/Queue ID is invented.
+- `resolved`: both endpoints non-null and well-typed, `reason: null`. The static
+  analysis resolved the connection under its stated conditions. It does not mean
+  it ran.
+- `candidate`: both endpoints non-null and well-typed, plus a nonempty reason
+  explaining uncertainty about that possible connection. Alternative candidates
+  are separate relations with their own provenance; they do not imply coverage
+  of every possible target.
+- `unresolved`: exactly one of `source` or `target` is `null`, plus a nonempty
+  reason. The known endpoint must exist and have the type required by the
+  relation kind; the unknown endpoint's expected type also follows from that
+  kind. Both endpoints null is rejected because no known binding anchors the
+  connection. No fake function/Queue ID is invented. A non-null missing ID is
+  invalid, even on an unresolved relation.
+
+For example, a FIFO pull whose consumer and call site are known but whose Queue
+alias is unresolved is `dequeues` with `source: null`, `target: <consumer ID>`
+and reason `queue alias could not be resolved`. Its `evidence.location_ids`
+retains the pull site. An unknown call target instead uses `source: <caller ID>`
+and `target: null`. The build is determined by the known endpoint, and every
+evidence location must belong to that build. The same ownership rule applies
+when validating run references and accumulating candidate support.
 
 Relation IDs hash the complete `{kind, source, target, resolution, evidence}`
 using the same algorithm with prefix `relation:`. Different source sites,
@@ -169,8 +183,8 @@ event must explicitly contain the matching `relation_id` in addition to its
 ordinary Trace fields. Producers may emit that optional extension only when
 the event actually measures that relation and its endpoint mapping. A
 site/function entry observation alone cannot certify a whole inter-function
-edge. An unresolved null target cannot be directly observed as a concrete
-connection. A candidate may be observed in a particular run without rewriting
+edge. A relation with either endpoint unresolved cannot be directly observed as
+a concrete connection. A candidate may be observed in a particular run without rewriting
 the static relation or proving it occurs in every run. Dropped events do not
 invalidate a surviving positive direct observation.
 
@@ -225,8 +239,12 @@ from textual CFG names or legacy lifecycle/queue markers is implemented here.
 
 `fixture/execution/catalog.json` plus `a.c` and `b.c` define the collision cases.
 `tests/test_execution.py` materializes and JSON-round-trips the static boundary,
-tests every relation kind, checks unknown endpoints versus dangling references,
-and verifies build/plan/run/event provenance and evidence separation. The
+tests every relation kind, checks unknown source/target endpoints versus dangling
+references,
+and verifies build/plan/run/event provenance and evidence separation. An unknown
+Queue source retains its consumer, pull-site location and reason as a diagnostic;
+it may have run-local candidate support but cannot gain direct-observation or
+model-uniqueness support, even with a matching raw event. The
 fixture's connection declarations are hand-authored, not claimed extractions.
 
 ```bash
