@@ -4,6 +4,12 @@ This prototype uses real execution of a pthread/queue fixture and Clang 18 textu
 
 Python package: `onion`, Python >=3.10, standard library only. JSON schema_version = 1.
 
+M1 adds a separate, versioned execution-structure boundary implemented in
+`onion/execution.py`: [`docs/execution-structure.md`](docs/execution-structure.md).
+It defines scoped identities, typed static relations, per-run evidence and
+cross-run support. Its documents have an explicit `kind` discriminator and do
+not replace or broaden the function-local CFG, Plan, Trace or Core API below.
+
 ## Model
 
 `{schema_version, build_id, provenance, function, nodes, edges, region, sites}`.

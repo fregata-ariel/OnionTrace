@@ -72,6 +72,7 @@ push（main）、pull request、手動実行でGitHub Actionsが動作します�
 | --- | --- |
 | `onion/cfg.py` | ClangテキストCFGの構造化。将来LibToolingで置換する境界 |
 | `onion/core.py` | 候補経路の再構成、追加地点の推薦、run別根拠の蓄積 |
+| `onion/execution.py` | M1の実行構造・識別子・run証拠のJSON境界と参照検証 |
 | `onion/demo.py` | ビルドから実行・HTML出力までの接続 |
 | `fixture/` | 実スレッド・Queueと明示的な候補プローブ |
 | `viewer/` | 外部依存のないHTML/SVG表示 |
@@ -80,6 +81,9 @@ push（main）、pull request、手動実行でGitHub Actionsが動作します�
 | `tests_optional/` | 外部提供のOAIデータを検証する任意テスト |
 
 設計と制約は[docs/prototype-v0.1.md](docs/prototype-v0.1.md)、JSON境界は[CONTRACT.md](CONTRACT.md)に記載しています。
+
+M1の[実行構造契約](docs/execution-structure.md)では、関数・スレッド役割・論理Queue・callbackと型付き接続を定義しています。
+現在は手書きfixtureによる境界検証の段階です。OAIからの構造抽出と既存探索器への接続は後続のIssueで実装します。
 
 OAIのCFGは別途取得した場合だけ`python3 -m onion.demo --oai-dump /path/to/cfg --out out`で表示できます。
 外部コーパスの検査は`ONION_OAI_CFG_DIR=/path/to/cfg python3 -m unittest discover -s tests_optional -v`です。
