@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 from onion.core import reconstruct, recommend
 from onion.demo import run_demo, render_report
 from onion.build_inputs import query
+from onion.libtooling import extract_manifest
 
 
 class Tee:
@@ -63,6 +64,17 @@ def main():
     subprocess.run([sys.executable, '-m', 'onion.build_inputs', 'capture', '--profile', 'generic',
                     '--build', str(manifest_build), '--target', 'nr-softmodem',
                     '--target', 'nr-uesoftmodem', '--out', str(output / 'build-inputs')], cwd=ROOT, check=True)
+    tooling_build = output / 'libtooling-build'
+    subprocess.run(['cmake', '-S', str(ROOT / 'tools/libtooling'), '-B', str(tooling_build),
+                    '-G', 'Ninja', '-DLLVM_DIR=' + os.environ.get('LLVM_DIR', '/usr/lib/llvm-18/lib/cmake/llvm'),
+                    '-DClang_DIR=' + os.environ.get('Clang_DIR', '/usr/lib/llvm-18/lib/cmake/clang')], check=True)
+    subprocess.run(['cmake', '--build', str(tooling_build), '--parallel', '2'], check=True)
+    tool = tooling_build / 'onion-extract'
+    os.environ['ONION_EXTRACTOR'] = str(tool)
+    manifest = json.loads((output / 'build-inputs/manifest.json').read_text())
+    extraction = extract_manifest(manifest, tool, output / 'source-extraction')
+    if not extraction['ready']:
+        raise RuntimeError('Source extraction failed: ' + json.dumps(extraction['summary']))
     suite = unittest.defaultTestLoader.discover(str(ROOT / 'tests'), pattern='test_*.py')
     with (output / 'tests.log').open('w') as log:
         result = unittest.TextTestRunner(stream=Tee(sys.stdout, log), verbosity=2).run(suite)
@@ -78,3 +90,4 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
