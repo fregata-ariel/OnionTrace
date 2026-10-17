@@ -109,3 +109,11 @@ calls to runtime evidence.
 Fixed OAI 2026.w07 full-build/corpus acceptance remains #11. No OAI execution,
 optimized-instruction mapping, whole-program points-to analysis or cross-build
 source-position stability is claimed.
+
+## T4 additive fields
+
+T4 adds canonical function types, parameter counts, semantic argument values
+(function designators, unmodified parameter references, opaque expressions and
+conditional candidates), lexical call conditions and validated `thread_api`
+contracts. Existing v1 fields and the local CFG adapter are preserved. Older
+v1 extraction files must be re-extracted for [T4](thread-entrypoints.md).

@@ -15,6 +15,8 @@ from onion.core import reconstruct, recommend
 from onion.demo import run_demo, render_report
 from onion.build_inputs import query
 from onion.libtooling import extract_manifest
+from onion.build_inputs import collect
+from onion.threads import build_threads
 
 
 class Tee:
@@ -75,6 +77,17 @@ def main():
     extraction = extract_manifest(manifest, tool, output / 'source-extraction')
     if not extraction['ready']:
         raise RuntimeError('Source extraction failed: ' + json.dumps(extraction['summary']))
+    thread_build = output / 'threads/build'
+    query(thread_build)
+    subprocess.run(['cmake', '-S', str(ROOT / 'fixture/threads'), '-B', str(thread_build),
+                    '-G', 'Ninja', '-DCMAKE_C_COMPILER=' + options.cc], check=True)
+    thread_manifest = collect(thread_build, ['nr-softmodem', 'nr-uesoftmodem'])
+    thread_extraction = extract_manifest(thread_manifest, tool, output / 'threads/extraction')
+    thread_graph = build_threads(thread_manifest, thread_extraction)
+    for name, value in [('manifest', thread_manifest), ('threads', thread_graph)]:
+        (output / 'threads' / (name + '.json')).write_text(json.dumps(value, indent=2) + '\n')
+    if not thread_graph['ready'] or any(not g['spawns'] for g in thread_graph['graphs']):
+        raise RuntimeError('Thread fixture extraction failed')
     suite = unittest.defaultTestLoader.discover(str(ROOT / 'tests'), pattern='test_*.py')
     with (output / 'tests.log').open('w') as log:
         result = unittest.TextTestRunner(stream=Tee(sys.stdout, log), verbosity=2).run(suite)
