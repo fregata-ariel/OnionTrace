@@ -1,6 +1,6 @@
 # Onion prototype v0.1 internal contract
 
-This prototype uses real execution of a pthread/queue fixture and Clang 18 textual CFG export. It is not an OAI runtime trace and is not the future LibTooling extractor.
+This prototype uses real execution of a pthread/queue fixture and Clang 18 textual CFG export. It is not an OAI runtime trace. M1/T3 adds a separate LibTooling source-extraction boundary; the v0.1 demo retains the textual adapter for comparison.
 
 Python package: `onion`, Python >=3.10, standard library only. JSON schema_version = 1.
 
@@ -44,3 +44,13 @@ Path enumeration bounded: cycle/path limit must produce `incomplete`, never uniq
 ## CI boundary
 
 Required tests run without OAI data. `scripts/ci.py` always creates fresh session data before discovery and treats any skipped required test as a failure. Optional OAI corpus tests live outside `tests/`.
+
+
+## M1 source extraction boundary
+
+`tools/libtooling` (Clang 18) and `onion/libtooling.py` consume the T2 manifest and
+produce `clang_source_extraction` / `source_extraction_manifest` v1 documents.
+See [docs/libtooling-extractor.md](docs/libtooling-extractor.md) for schema,
+argument adjustments, failure behavior and scoped IDs. These are source CFG and
+call-site records, not runtime evidence or T1 execution_structure documents.
+The adapter preserves uncertainties and exact marker mappings into Model v1.
