@@ -153,6 +153,41 @@ class ThreadTests(unittest.TestCase):
         self.assertFalse(json.loads((output / 'threads.json').read_text())['ready'])
         self.assertTrue(json.loads((output / 'failures.json').read_text()))
 
+    def test_oai_gate_checks_selected_chain_while_retaining_other_frontiers(self):
+        from onion.oai_threads import verify_paths
+        from onion.build_inputs import digest
+        manifest = copy.deepcopy(self.manifest)
+        manifest.update(profile='oai')
+        manifest['context']['source']['commit'] = 'synthetic-test-revision'
+        manifest['manifest_id'] = digest({k: v for k, v in manifest.items() if k != 'manifest_id'})
+        graph = copy.deepcopy(self.result)
+        graph.update(input_manifest_id=manifest['manifest_id'], ready=False)
+        target = next(g for g in graph['graphs'] if g['target'] == 'nr-uesoftmodem')
+        target['traversal_complete'] = False  # Unrelated bounded frontier.
+        functions = {f['id']: f for f in target['functions']}
+        spawn = next(s for s in target['spawns'] if functions[s['start_id']]['name'] == 'worker')
+        calls = {c['id']: (f, c) for f in target['functions'] for c in f['calls']}
+        steps, sources = [], {}
+        for key in spawn['call_path']:
+            function, call = calls[key]
+            span = call['range']['expansion']
+            relative = Path(span['begin']['path']).relative_to(ROOT).as_posix()
+            row = next(r for r in manifest['entries'] if r.get('cache_key') == function['_compilation_id'])
+            record = next(d for d in row['dependencies'] if d['path'] == span['begin']['path'])
+            sources[relative] = {'path': relative, 'sha256': record['sha256']}
+            steps.append({'caller': function['name'], 'callee': call['callee_name'],
+                          'site': {'path': relative, 'start_offset': span['begin']['offset'],
+                                   'end_offset': span['end']['offset']}})
+        expected = {'revision': 'synthetic-test-revision', 'sources': list(sources.values()),
+                    'paths': [{'target': target['target'], 'start': 'worker', 'calls': steps}]}
+        accepted = verify_paths(manifest, graph, expected)
+        self.assertTrue(accepted['full_extraction_verified'])
+        self.assertFalse(accepted['traversal_complete'])
+        edge = next(r for r in target['relations'] if r['id'] == spawn['call_path'][0])
+        edge.update(target=None, resolution='unresolved')
+        with self.assertRaisesRegex(ValueError, 'path absent'):
+            verify_paths(manifest, graph, expected)
+
 class OAIBoundaryTests(unittest.TestCase):
     def test_source_audit_never_claims_full_extraction_and_rejects_changed_sources(self):
         from hashlib import sha256

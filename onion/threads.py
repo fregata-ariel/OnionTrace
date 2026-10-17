@@ -59,14 +59,11 @@ def _load(manifest, extraction):
     return rows, failures
 
 
-def _resolve(functions, compilation, usr, linkage, signature, local=None):
+def _resolve(functions, definitions, compilation, usr, linkage, signature, local=None):
     if local is not None and linkage != 'external':
         candidates = [local] if local in functions else []
     elif usr:
-        candidates = [f['id'] for f in functions.values() if f['usr'] == usr
-                      and f['linkage'] == linkage
-                      and (linkage == 'external' or f['_compilation_id'] == compilation)
-                      and f['canonical_type'] == signature]
+        candidates = definitions.get((usr, linkage, signature, None if linkage == 'external' else compilation), [])
     else:
         candidates = []
     if len(candidates) == 1:
@@ -87,13 +84,13 @@ def _substitute(value, bindings):
     return result
 
 
-def _entry(functions, value, compilation):
+def _entry(functions, definitions, value, compilation):
     origin = value.get('origin_compilation', compilation)
     if value.get('value_kind') == 'function':
-        return _resolve(functions, origin, value['function_usr'], value['function_linkage'], value['function_type'])
+        return _resolve(functions, definitions, origin, value['function_usr'], value['function_linkage'], value['function_type'])
     candidates = set()
     for candidate in value.get('candidates', []):
-        target, possible, _ = _entry(functions, candidate, origin)
+        target, possible, _ = _entry(functions, definitions, candidate, origin)
         candidates.update(possible)
     return None, sorted(candidates), 'computed/unknown function pointer; points-to analysis not performed'
 
@@ -136,6 +133,11 @@ def build_threads(manifest, extraction, targets=None, *, max_contexts=10000, max
                     raise ValueError('duplicate function across extraction artifacts')
                 functions[function['id']] = {**copy.deepcopy(function), '_compilation_id': raw['compilation_id']}
         mains = [f['id'] for f in functions.values() if f['name'] == 'main' and f['linkage'] == 'external']
+        definitions = {}
+        for function in functions.values():
+            key = (function['usr'], function['linkage'], function['canonical_type'],
+                   None if function['linkage'] == 'external' else function['_compilation_id'])
+            definitions.setdefault(key, []).append(function['id'])
         graph = {'target': target_name, 'root_id': mains[0] if len(mains) == 1 else None,
                  'root_candidates': sorted(mains), 'functions': list(functions.values()),
                  'relations': [], 'spawns': [], 'frontiers': [],
@@ -152,7 +154,7 @@ def build_threads(manifest, extraction, targets=None, *, max_contexts=10000, max
             for call in function['calls']:
                 calls[call['id']] = call
                 resolved, candidates, reason = _resolve(
-                    functions, function['_compilation_id'], call['callee_usr'], call['callee_linkage'],
+                    functions, definitions, function['_compilation_id'], call['callee_usr'], call['callee_linkage'],
                     call.get('callee_canonical_type'), call['target_id'])
                 if call['kind'] != 'direct':
                     resolved, candidates, reason = None, [], 'indirect call; points-to analysis not performed'
@@ -196,7 +198,7 @@ def build_threads(manifest, extraction, targets=None, *, max_contexts=10000, max
                 if relation['api'] and not relation['blocked']:
                     api = APIS[relation['api']]
                     entry = actuals[api['entry']]
-                    start, candidates, reason = _entry(functions, entry, function['_compilation_id'])
+                    start, candidates, reason = _entry(functions, definitions, entry, function['_compilation_id'])
                     role = 'thread/' + digest({'target': target_name, 'call_path': chain})
                     spawn = {'id': role, 'kind': 'thread_role', 'api': relation['api'],
                              'creation_call_id': call['id'], 'call_path': chain,

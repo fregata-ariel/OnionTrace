@@ -39,7 +39,7 @@ def verify_paths(manifest, graph, expected):
     if (manifest.get('profile') != 'oai' or not manifest.get('ready')
             or manifest.get('manifest_id') != digest({k: v for k, v in manifest.items() if k != 'manifest_id'})
             or manifest['context']['source'].get('commit') != expected['revision']
-            or graph.get('kind') != 'thread_entrypoint_graph' or not graph.get('ready')
+            or graph.get('kind') != 'thread_entrypoint_graph'
             or graph.get('input_manifest_id') != manifest['manifest_id']):
         raise ValueError('full OAI acceptance needs ready matching pinned OAI artifacts')
     verified = []
@@ -48,6 +48,8 @@ def verify_paths(manifest, graph, expected):
         if len(graphs) != 1:
             raise ValueError('expected exactly one target graph: ' + path['target'])
         target = graphs[0]
+        if not target.get('root_id') or not target.get('extraction_complete') or target.get('failures'):
+            raise ValueError('selected target needs a main and complete TU extraction')
         functions = {f['id']: f for f in target['functions']}
         calls = {c['id']: (f, c) for f in target['functions'] for c in f['calls']}
         relations = {r['id']: r for r in target['relations'] if r['kind'] == 'calls'}
@@ -88,7 +90,9 @@ def verify_paths(manifest, graph, expected):
             raise ValueError('resolved pinned source path absent: ' + path['target'] + ' -> ' + path['start'])
         verified.append({'target': path['target'], 'start': path['start'], 'spawn_ids': matches})
     return {'kind': 'oai_thread_path_acceptance', 'revision': expected['revision'],
-            'full_extraction_verified': True, 'verified_paths': verified}
+            'full_extraction_verified': True, 'verified_paths': verified,
+            'scope': 'five audited paths from actual OAI inputs; unrelated frontiers remain explicit',
+            'traversal_complete': all(g['traversal_complete'] for g in graph['graphs'])}
 
 
 def main():
