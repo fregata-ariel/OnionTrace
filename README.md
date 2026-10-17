@@ -99,3 +99,5 @@ M1/T2の[解析入力の準備とmanifest](docs/oai-build-inputs.md)では、固
 M1/T3の[LibTooling抽出器](docs/libtooling-extractor.md)は、T2のmanifestからコンパイル条件ごとに
 CFG・型・呼出し箇所・マクロ位置を構造化します。未解決呼出しと失敗を保持し、小規模fixtureで
 既存の再構成・推薦との対応を検証します。通常デモのテキスト取込は比較用に継続します。
+
+M1/T4のmainからスレッド開始関数への静的経路抽出は[thread-entrypoints](docs/thread-entrypoints.md)を参照。
