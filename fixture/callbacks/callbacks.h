@@ -14,4 +14,8 @@ void init_pool(pthread_t *, tpool_t *);
 void *actor_thread(void *);
 void *worker_thread(void *);
 void submit(tpool_t *, void (*)(void *));
+void forward_unknown(tpool_t *, task_t);
+void forward_alternate(tpool_t *, task_t);
+void forward_escape(tpool_t *, task_t);
+void forward_unchanged(tpool_t *, task_t);
 #endif

@@ -26,6 +26,10 @@ int main(int argc, char **argv) {
   local.func = opaque();
   pushTpool(&pool, local);
   submit(&pool, process);
+  forward_unknown(&pool, (task_t){.func = process});
+  forward_alternate(&pool, (task_t){.func = process});
+  forward_escape(&pool, (task_t){.func = process});
+  forward_unchanged(&pool, (task_t){.func = process});
   if (0) pushTpool(&pool, (task_t){.func = alternate});
   return 0;
 }

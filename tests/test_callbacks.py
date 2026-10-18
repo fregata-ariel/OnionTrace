@@ -83,6 +83,42 @@ class CallbackTests(unittest.TestCase):
         self.assertTrue(any('len_thr == 0' in g.get('condition', {}).get('text', '') for g in pool_inline['conditions']))
         self.assertTrue(actor['conditions'])
 
+    def _forward_registration(self, name):
+        return next(r for r in self.gnb['registrations'] if self.names[r['source']] == name)
+
+    def _assert_modified_task(self, name, expected):
+        registration = self._forward_registration(name)
+        self.assertEqual(registration['resolution'], 'unresolved')
+        self.assertTrue(registration['unknown'])
+        self.assertEqual({self.names[c] for c in registration['candidates']}, expected)
+        self.assertTrue(registration['assignment_evidence'])
+        storage = registration['values'][0]['storage']
+        self.assertEqual(storage['value_kind'], 'variable')
+        self.assertEqual(storage['parameter_index'], 1)
+        self.assertTrue(storage['write_evidence'])
+        self.assertTrue(all(e['range'] and e['id'] for e in storage['write_evidence']))
+        self.assertTrue(all(r['resolution'] == 'candidate' for r in self.gnb['relations']
+                            if r['kind'] == 'binds' and r['source'] == registration['id']))
+        return registration
+
+    def test_task_parameter_member_unknown_write_is_not_forwarded_as_resolved(self):
+        self._assert_modified_task('forward_unknown', {'process'})
+
+    def test_task_parameter_member_known_write_keeps_both_candidates_unknown(self):
+        self._assert_modified_task('forward_alternate', {'process', 'alternate'})
+
+    def test_task_parameter_member_address_escape_is_unknown(self):
+        registration = self._assert_modified_task('forward_escape', {'process'})
+        self.assertTrue(any(w['effect'] == 'address_escape' for w in registration['assignment_evidence']))
+        self.assertTrue(any('address escape' in v.get('reason', '') for v in registration['values']))
+
+    def test_unchanged_task_parameter_still_forwards_exact_record(self):
+        registration = self._forward_registration('forward_unchanged')
+        self.assertEqual(registration['resolution'], 'resolved')
+        self.assertFalse(registration['unknown'])
+        self.assertEqual({self.names[c] for c in registration['candidates']}, {'process'})
+        self.assertEqual(registration['assignment_evidence'], [])
+
     def test_same_function_in_multiple_roles_and_submitters(self):
         process = next(k for k, v in self.names.items() if v == 'process')
         callbacks = {r['id'] for r in self.gnb['registrations'] if process in r['candidates']}

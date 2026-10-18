@@ -103,10 +103,11 @@ public:
         V["function_usr"] = usr(F);
         V["function_linkage"] = linkage(F);
         V["function_type"] = F->getType().getCanonicalType().getAsString(Policy);
-      } else if (const auto *P = dyn_cast<ParmVarDecl>(R->getDecl()); P && !MutableParameters.count(P)) {
+      } else if (const auto *P = dyn_cast<ParmVarDecl>(R->getDecl())) {
         for (unsigned I = 0; I < Owner->getNumParams(); ++I) if (Owner->getParamDecl(I) == P) {
-          V["value_kind"] = "parameter";
+          V["value_kind"] = MutableParameters.count(P) ? "variable" : "parameter";
           V["parameter_index"] = I;
+          V["variable_usr"] = usr(P);
         }
       } else if (isa<VarDecl>(R->getDecl())) {
         V["value_kind"] = "variable";
@@ -254,8 +255,15 @@ public:
     class Writes : public RecursiveASTVisitor<Writes> {
       std::set<const ParmVarDecl *> &Modified;
       void mark(const Expr *E) {
-        if (const auto *R = dyn_cast<DeclRefExpr>(E->IgnoreParenImpCasts()))
+        E = E->IgnoreParenImpCasts();
+        if (const auto *R = dyn_cast<DeclRefExpr>(E))
           if (const auto *P = dyn_cast<ParmVarDecl>(R->getDecl())) Modified.insert(P);
+        // Mutating/escaping a subobject invalidates whole-parameter forwarding
+        // too. This is deliberately conservative for pointer/array bases.
+        if (const auto *M = dyn_cast<MemberExpr>(E)) mark(M->getBase());
+        if (const auto *A = dyn_cast<ArraySubscriptExpr>(E)) mark(A->getBase());
+        if (const auto *U = dyn_cast<UnaryOperator>(E))
+          if (U->getOpcode() == UO_Deref) mark(U->getSubExpr());
       }
     public:
       explicit Writes(std::set<const ParmVarDecl *> &M) : Modified(M) {}
@@ -328,9 +336,15 @@ public:
     public:
       BodyVisitor(Extractor &E, const FunctionDecl *F, std::string O, std::map<const Stmt *, std::string> &P, j::Array &C, j::Array &W, j::Array &U)
           : E(E), Function(F), Owner(O), Placement(P), Calls(C), Writes(W), Problems(U) {}
-      void write(j::Object Target, const Expr *Value, const Stmt *Site, SourceRange Range) {
+      void write(j::Object Target, const Expr *Value, const Stmt *Site, SourceRange Range, bool Escape = false) {
+        auto Written = E.value(Value, Function);
+        if (Escape) {
+          Written["value_kind"] = "opaque";
+          Written["reason"] = "address escape; storage may be modified";
+        }
         Writes.push_back(j::Object{{"id", Owner + "/write/" + std::to_string(Writes.size())},
-          {"target", std::move(Target)}, {"value", E.value(Value, Function)},
+          {"target", std::move(Target)}, {"value", std::move(Written)},
+          {"effect", Escape ? "address_escape" : "write"},
           {"range", E.range(Range)}, {"conditions", E.guards(Site)}});
       }
       bool VisitVarDecl(VarDecl *V) {
@@ -340,6 +354,15 @@ public:
       }
       bool VisitBinaryOperator(BinaryOperator *B) {
         if (B->isAssignmentOp()) write(E.value(B->getLHS(), Function), B->getRHS(), B, B->getSourceRange());
+        return true;
+      }
+      bool VisitUnaryOperator(UnaryOperator *U) {
+        if (U->getOpcode() == UO_AddrOf) {
+          auto Target = E.value(U->getSubExpr(), Function);
+          auto Kind = Target.getString("value_kind");
+          if (Kind == "variable" || Kind == "parameter" || Kind == "member")
+            write(std::move(Target), U, U, U->getSourceRange(), true);
+        }
         return true;
       }
       bool TraverseLambdaExpr(LambdaExpr *L) {

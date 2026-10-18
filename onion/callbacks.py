@@ -13,6 +13,17 @@ from .libtooling import write
 from .threads import build_threads, _entry, _reachable
 
 
+def _storage_key(value):
+    """Declaration identity shared by an object and its member effects."""
+    while value.get('value_kind') == 'member':
+        value = value['base']
+    if 'parameter_index' in value:
+        return 'parameter', value['parameter_index']
+    if value.get('variable_usr'):
+        return 'variable', value['variable_usr']
+    return None
+
+
 def _expand(value, function, bindings=(), seen=()):
     """Flow-insensitive local write alternatives; unknown writes are not killed.
 
@@ -22,16 +33,26 @@ def _expand(value, function, bindings=(), seen=()):
     value = copy.deepcopy(value)
     kind = value.get('value_kind')
     value.setdefault('origin_compilation', function['_compilation_id'])
-    if kind == 'parameter' and value['parameter_index'] < len(bindings):
-        return copy.deepcopy(bindings[value['parameter_index']])
+    key = _storage_key(value)
+    effects = [w for w in function['callback_writes']
+               if key is not None and _storage_key(w['target']) == key]
+    if kind == 'parameter':
+        if effects:
+            # Also defend against older parameter/member extraction shapes:
+            # the original actual is only one candidate after a member effect.
+            value['value_kind'] = kind = 'variable'
+        elif value['parameter_index'] < len(bindings):
+            return copy.deepcopy(bindings[value['parameter_index']])
     if kind == 'variable':
-        key = value['variable_usr']
         if key in seen:
             return {**value, 'alternatives': [], 'unknown': True}
-        writes = [w for w in function['callback_writes']
-                  if w['target'].get('variable_usr') == key]
+        writes = [w for w in effects if w['target'].get('value_kind') != 'member']
         value['alternatives'] = [_expand(w['value'], function, bindings, (*seen, key)) for w in writes]
-        value['write_evidence'] = [{'id': w['id'], 'range': w['range'], 'conditions': w['conditions']} for w in writes]
+        index = value.get('parameter_index')
+        if index is not None and index < len(bindings):
+            value['alternatives'].append(copy.deepcopy(bindings[index]))
+        value['write_evidence'] = [{'id': w['id'], 'range': w['range'], 'conditions': w['conditions'],
+                                    'effect': w.get('effect', 'write')} for w in effects]
         value['unknown'] = True  # no alias/escape/definite-assignment proof
     elif kind == 'member':
         value['base'] = _expand(value['base'], function, bindings, seen)
@@ -169,10 +190,10 @@ def build_callbacks(manifest, extraction, targets=None, *, max_contexts=10000, m
                         obj = call['arguments'][1]
                         for assignment in function['callback_writes']:
                             lhs = assignment['target']
-                            if (lhs.get('callback_protocol') == 'pool' and
-                                    lhs.get('base', {}).get('variable_usr') == obj.get('variable_usr') and
-                                    obj.get('variable_usr')):
-                                values.append(_expand(assignment['value'], function))
+                            if ((lhs.get('callback_protocol') == 'pool' or assignment.get('effect') == 'address_escape') and
+                                    _storage_key(obj) is not None and _storage_key(lhs) == _storage_key(obj)):
+                                for context in available:
+                                    values.append(_expand(assignment['value'], function, context['bindings']))
                                 assignment_evidence.append(assignment)
                     choices = [_choices(v, functions, definitions, compilation) for v in values]
                     candidates = sorted({c for found, _, _, _ in choices for c in found})

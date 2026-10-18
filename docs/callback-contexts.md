@@ -48,6 +48,12 @@ storage is conservative: initializers and explicit writes form flow-insensitive
 alternatives; aliases, escapes and definite assignment are not proven. Unknown
 assignments remain unknown even when one initializer names a function. Direct
 parameter forwarding retains the originating compilation, including across TUs.
+Member writes and member address escapes invalidate whole-parameter forwarding,
+including for by-value task records. The original actual remains a candidate,
+known field writes add candidates, and write/escape ranges and conditions remain
+as evidence; the submitted callback value stays `unresolved` / `unknown`.
+Unchanged record parameters can still forward their exact actual value. The
+adapter also checks member effects on older `parameter` extraction shapes.
 
 Role contexts start at main and resolved T4 thread start IDs, follow only resolved
 direct calls, and retain call paths and conditions. Indirect callback candidates
