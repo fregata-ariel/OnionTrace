@@ -40,11 +40,19 @@ void modified(notifiedFIFO_t *q) {
   q = &second.fifo;
   pushNotifiedFIFO(q, NULL);
 }
+void override_response(void) {
+  notifiedFIFO_elt_t *e = pullNotifiedFIFO(&first.fifo);
+  if (e) {
+    e->reponseFifo = &second.reply;
+    pushNotifiedFIFO(e->reponseFifo, e);
+  }
+}
 int main(void) {
   unsigned long a, b, c;
   initNotifiedFIFO(&first.fifo); initNotifiedFIFO(&second.fifo);
   initNotifiedFIFO(&first.reply); initNotifiedFIFO(&second.reply);
   submit(&first.fifo, &first.reply); submit(&second.fifo, &second.reply);
+  override_response();
   threadCreate(&a, actor_thread, (void *)&first, "a", 0, 0);
   threadCreate(&b, actor_thread, (void *)&second, "b", 0, 0);
   pullNotifiedFIFO(&first.reply); pollNotifiedFIFO(&second.reply);

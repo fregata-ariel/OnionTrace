@@ -60,6 +60,11 @@ def _expand(value, function, bindings=(), seen=(), depth=0):
     if depth > 32:
         return {'shape': 'opaque', 'reason': 'value expansion limit'}
     key = _key(v)
+    if v.get('shape') == 'address' and v['base'].get('shape') == 'storage' and v['base'].get('pointer'):
+        # &p denotes the pointer slot, not p's current pointee. Do not silently
+        # collapse an extra level of indirection while forwarding q**.
+        v['reason'] = 'address of pointer storage; indirect loads/writes unresolved'
+        return v
     if v.get('shape') == 'storage' and v.get('pointer'):
         effects = [w for w in function['callback_writes'] if _key(w.get('queue_target', {})) == key]
         index = v.get('parameter_index')
@@ -74,6 +79,17 @@ def _expand(value, function, bindings=(), seen=(), depth=0):
                 choices.append(copy.deepcopy(bindings[index]))
             return {**v, 'shape': 'alternatives', 'choices': choices, 'unknown': True,
                     'reason': 'pointer storage writes/escapes are not a complete alias proof',
+                    'write_evidence': [{'id': w['id'], 'range': w['range'], 'conditions': w['conditions'],
+                                        'effect': w['effect']} for w in effects]}
+    # Explicit pointer-field writes are alternatives too. In particular,
+    # reponseFifo may be changed after construction or acquisition.
+    if v.get('shape') == 'member' and v.get('pointer') and key not in seen:
+        effects = [w for w in function['callback_writes'] if _key(w.get('queue_target', {})) == key]
+        if effects:
+            original = {**v, 'base': _expand(v['base'], function, bindings, (*seen, key), depth + 1)}
+            return {'shape': 'alternatives', 'choices': [original] + [
+                _expand(w['queue_value'], function, bindings, (*seen, key), depth + 1) for w in effects],
+                    'unknown': True, 'reason': 'pointer field writes/escapes; last value is not proven',
                     'write_evidence': [{'id': w['id'], 'range': w['range'], 'conditions': w['conditions'],
                                         'effect': w['effect']} for w in effects]}
     if 'base' in v:
@@ -147,6 +163,14 @@ def _origins(v):
         return [o for c in v['choices'] for o in _origins(c)]
     if v.get('shape') == 'cast':
         return _origins(v['base'])
+    return []
+
+
+def _members(v):
+    if v.get('shape') == 'member':
+        return [v]
+    if v.get('shape') == 'alternatives':
+        return [m for c in v['choices'] for m in _members(c)]
     return []
 
 
@@ -239,7 +263,8 @@ def build_queues(manifest, extraction, targets=None, *, max_contexts=10000, max_
                     graph['operations'].append({**common, 'operation': api, 'queue': queue, 'queue_candidates': refs,
                                                 'arguments': args, 'semantics': CONTRACTS[api],
                                                 'resolution': 'candidate' if refs and not blocked else 'unresolved',
-                                                'reason': 'logical source locations; runtime instance and aliases unproven' if refs else
+                                                'reason': 'unreachable CFG placement or incomplete function semantics' if blocked else
+                                                          'logical source locations; runtime instance and aliases unproven' if refs else
                                                           'no queue location recovered (NULL response or opaque alias)',
                                                 'runtime_instance': None})
         _connect(graph)
@@ -301,24 +326,27 @@ def _connect(graph):
     # retrieval and candidate submissions, not every constructor in a target.
     for response in producers:
         queue = response['queue']
-        if queue.get('shape') != 'member' or queue.get('field_name') != 'reponseFifo':
-            continue
-        for acquired in origins(queue['base'], {'dequeue', 'poll'}, response):
+        acquired_elements = [o for m in _members(queue) if m.get('field_name') == 'reponseFifo'
+                             for o in origins(m['base'], {'dequeue', 'poll'}, response)]
+        for acquired in acquired_elements:
             if acquired['id'] not in {o['id'] for o in origins(response['arguments'][1], {'dequeue', 'poll'}, response)}:
                 continue
             link('response_destination', acquired, response, 'response field of an acquired element; may be NULL or overwritten')
             for submission in producers:
+                if submission['blocked']:
+                    continue
                 if not _matches(submission['queue_candidates'], acquired['queue_candidates']):
                     continue
                 for creation in origins(submission['arguments'][1], {'create'}, submission):
                     link('returns_to', creation, response, 'constructor response queue is a candidate; field writes/aliasing and non-NULL guard retained')
                     for destination in consumers:
-                        if _matches(creation['queue_candidates'], destination['queue_candidates']):
+                        if (_matches(creation['queue_candidates'], destination['queue_candidates']) or
+                                _matches(response['queue_candidates'], destination['queue_candidates'])):
                             link('response_transfer', response, destination, 'candidate response queue from submitted allocation; no element identity or execution proof')
     for invoke in graph['processing_calls']:
         callee = invoke['callee']
-        if callee.get('shape') == 'member':
-            for acquired in origins(callee['base'], {'dequeue', 'poll'}, invoke):
+        for member in _members(callee):
+            for acquired in origins(member['base'], {'dequeue', 'poll'}, invoke):
                 link('processes', acquired, invoke, 'callback on a retrieved element; callback targets remain T5 candidates')
     # Preserve direct processing calls and related CFG references. This also
     # expresses gNB's NULL-callback rx_func path, whose completion is a new job.

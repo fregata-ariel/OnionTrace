@@ -104,3 +104,7 @@ M1/T4のmainからスレッド開始関数への静的経路抽出は[thread-ent
 
 M1/T5のActor・task callback登録／投入／実行候補とinline条件・スレッド役割は
 [callback-contexts](docs/callback-contexts.md)を参照。候補・NULL・未解決とQueue別名の不確実性を保持します。
+
+M1/T6のnotifiedFIFOの投入・取得・応答先、論理Queueの基底オブジェクト／引数と
+公開・取得・所有権の境界は[notified-fifo](docs/notified-fifo.md)を参照。
+固定gNB経路のソース根拠と、#11用の実抽出検証gateを含みます。

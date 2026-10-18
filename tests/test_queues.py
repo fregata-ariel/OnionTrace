@@ -41,16 +41,16 @@ class QueueNativeTests(unittest.TestCase):
         cls.result = build_queues(cls.manifest, cls.extraction, ['nr-softmodem', 'nr-uesoftmodem'])
         cls.graph = cls.result['graphs'][0]
         cls.names = {f['id']: f['name'] for f in cls.graph['functions']}
-        cls.ops = {o['id']: o for o in cls.graph['operations']}
+        cls.operations = {o['id']: o for o in cls.graph['operations']}
 
     def ops(self, operation, function=None):
-        return [o for o in self.ops.values() if o['operation'] == operation and
+        return [o for o in self.operations.values() if o['operation'] == operation and
                 (function is None or self.names[o['source']] == function)]
 
     def test_all_operations_native_source_evidence_and_cfg(self):
         self.assertTrue(self.result['ready'])
-        self.assertEqual({o['operation'] for o in self.ops.values()}, set(CONTRACTS))
-        for op in self.ops.values():
+        self.assertEqual({o['operation'] for o in self.operations.values()}, set(CONTRACTS))
+        for op in self.operations.values():
             self.assertTrue(op['range']['expansion']['begin']['path'])
             self.assertIsNone(op['runtime_instance'])
             if not op['blocked']:
@@ -109,6 +109,15 @@ class QueueNativeTests(unittest.TestCase):
         self.assertTrue(modified['queue']['unknown'])
         self.assertEqual(len({json.dumps(r['base'], sort_keys=True) for r in modified['queue_candidates']}), 2)
 
+    def test_response_field_override_keeps_original_and_written_destinations(self):
+        response = self.ops('enqueue', 'override_response')[0]
+        self.assertTrue(response['queue']['unknown'])
+        self.assertTrue(response['queue']['write_evidence'])
+        targets = [self.operations[r['target']] for r in self.graph['relations']
+                   if r['kind'] == 'response_transfer' and r['source'] == response['id']]
+        self.assertEqual({r['operation'] for r in targets}, {'dequeue', 'poll'})
+        self.assertEqual(len(targets), 2)
+
     def test_gnb_null_callback_direct_processing_and_new_completion(self):
         registrations = {r['id']: r for r in self.graph['callback_registrations']}
         for op in self.ops('create', 'rx_func'):
@@ -122,7 +131,7 @@ class QueueNativeTests(unittest.TestCase):
                             for r in self.graph['relations']))
 
     def test_blocked_sites_and_incompatible_api_are_not_connected(self):
-        blocked = [o for o in self.ops.values() if o['blocked']]
+        blocked = [o for o in self.operations.values() if o['blocked']]
         self.assertTrue(blocked)
         self.assertFalse(any(r['source'] in {o['id'] for o in blocked} or r['target'] in {o['id'] for o in blocked}
                              for r in self.graph['relations']))
@@ -131,7 +140,7 @@ class QueueNativeTests(unittest.TestCase):
 
     def test_targets_artifact_integrity_and_limits(self):
         ue = self.result['graphs'][1]
-        self.assertFalse(set(self.ops) & {o['id'] for o in ue['operations']})
+        self.assertFalse(set(self.operations) & {o['id'] for o in ue['operations']})
         self.assertFalse(build_queues(self.manifest, self.extraction, max_contexts=1)['ready'])
         broken = copy.deepcopy(self.extraction)
         broken['entries'][0]['status'] = 'failed'
@@ -163,6 +172,38 @@ class QueueNativeTests(unittest.TestCase):
         self.assertEqual(subprocess.run(command, cwd=ROOT, capture_output=True).returncode, 1)
         self.assertTrue(json.loads((self.out / 'cli/failures.json').read_text()))
 
+    def test_actual_extraction_gate_checks_sites_hashes_and_connections(self):
+        from onion.oai_queues import verify_extraction
+        from onion.build_inputs import digest
+        manifest, extraction = copy.deepcopy(self.manifest), copy.deepcopy(self.extraction)
+        manifest['profile'] = 'oai'
+        manifest['context']['source'] = {'commit': 'fixture-only'}
+        manifest['manifest_id'] = digest({k: v for k, v in manifest.items() if k != 'manifest_id'})
+        extraction['input_manifest_id'] = manifest['manifest_id']
+        dequeue = self.ops('dequeue', 'L1_rx_thread')[0]
+        process = next(p for p in self.graph['processing_calls'] if p.get('callee_name') == 'rx_func')
+        completion = self.ops('enqueue', 'rx_func')[0]
+        path = Path(dequeue['range']['expansion']['begin']['path'])
+        relative = 'fixture/queues/' + path.name
+        expected = {'revision': 'fixture-only', 'target': 'nr-softmodem',
+                    'sources': [{'path': relative, 'sha256': file_record(path)['sha256']}], 'sites': [],
+                    'required_relations': [{'kind': 'processes', 'source': 'pull', 'target': 'process'},
+                                           {'kind': 'completion_candidate', 'source': 'process', 'target': 'completion'}]}
+        for key, row, group in [('pull', dequeue, 'operations'), ('process', process, 'processing_calls'),
+                                ('completion', completion, 'operations')]:
+            span = row['range']['expansion']
+            expected['sites'].append({'key': key, 'path': relative, 'function': self.names[row['source']], 'group': group,
+                                       'start_offset': span['begin']['offset'], 'end_offset': span['end']['offset']})
+        self.assertTrue(verify_extraction(manifest, extraction, expected)['full_extraction_verified'])
+        expected['required_relations'][0]['kind'] = 'response_transfer'
+        self.assertFalse(verify_extraction(manifest, extraction, expected)['full_extraction_verified'])
+        expected['required_relations'][0]['kind'] = 'processes'
+        expected['sites'][0]['end_offset'] += 1
+        self.assertFalse(verify_extraction(manifest, extraction, expected)['full_extraction_verified'])
+        expected['sites'][0]['end_offset'] -= 1
+        expected['sources'][0]['sha256'] = 'sha256:' + '0' * 64
+        self.assertFalse(verify_extraction(manifest, extraction, expected)['full_extraction_verified'])
+
 
 class QueueValueTests(unittest.TestCase):
     def test_unknown_bases_match_field_usr_but_names_alone_never_match(self):
@@ -183,11 +224,56 @@ class QueueValueTests(unittest.TestCase):
         self.assertTrue(value['unknown'])
         self.assertEqual(value['choices'][0]['reason'], 'cyclic pointer storage')
 
+    def test_address_of_pointer_storage_does_not_become_its_pointee(self):
+        p = {'shape': 'storage', 'scope': 'tu', 'usr': 'p', 'pointer': True}
+        obj = {'shape': 'storage', 'scope': 'tu', 'usr': 'queue', 'pointer': False}
+        value = {'shape': 'address', 'base': p}
+        function = {'id': 'f', 'callback_writes': [{'queue_target': p, 'queue_value': {'shape': 'address', 'base': obj}}]}
+        expanded = _expand(value, function)
+        self.assertEqual(expanded['base'], p)
+        self.assertFalse(_references(expanded)[0]['concrete'])
+
     def test_contracts_do_not_equate_attempts_returns_or_elapsed_to_residence(self):
         self.assertIn('attempt', CONTRACTS['enqueue']['publication'])
         self.assertIn('aborted', CONTRACTS['enqueue']['success_condition'])
         self.assertIn('NULL', CONTRACTS['dequeue']['ownership'])
         self.assertIn('contention', CONTRACTS['poll']['ownership'])
+
+
+class OaiQueueAuditTests(unittest.TestCase):
+    def test_pinned_source_audit_is_not_full_acceptance_and_detects_changes(self):
+        from hashlib import sha256
+        from onion.oai_queues import audit_sources
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'source.c'
+            data = b'void f() { pullNotifiedFIFO(q); }\n'
+            path.write_bytes(data)
+            text = 'pullNotifiedFIFO(q)'
+            start = data.index(text.encode())
+            expected = {'revision': 'pinned', 'sources': [{'path': 'source.c', 'sha256': 'sha256:' + sha256(data).hexdigest()}],
+                        'sites': [{'path': 'source.c', 'key': 'pull', 'start_offset': start, 'end_offset': start + len(text),
+                                   'line': 1, 'text': text}]}
+            result = audit_sources(tmp, expected)
+            self.assertTrue(result['source_audit_passed'])
+            self.assertFalse(result['full_extraction_verified'])
+            expected['sites'][0]['end_offset'] += 1
+            with self.assertRaisesRegex(ValueError, 'position mismatch'):
+                audit_sources(tmp, expected)
+            expected['sites'][0]['end_offset'] -= 1
+            path.write_bytes(data + b'/* changed */')
+            with self.assertRaisesRegex(ValueError, 'hash mismatch'):
+                audit_sources(tmp, expected)
+
+    def test_expectations_pin_revision_route_contract_and_no_fixture_acceptance(self):
+        from onion.oai_queues import EXPECTATIONS, verify_extraction
+        expected = json.loads(EXPECTATIONS.read_text())
+        self.assertEqual(expected['revision'], json.loads((ROOT / 'config/oai-2026.w07.json').read_text())['commit'])
+        self.assertEqual(len(expected['sites']), 18)
+        self.assertEqual(len(expected['sources']), 4)
+        self.assertTrue(any(s['group'] == 'contract' for s in expected['sites']))
+        self.assertEqual(len(expected['required_relations']), 6)
+        with self.assertRaisesRegex(ValueError, 'pinned OAI input'):
+            verify_extraction({'profile': 'generic'}, {}, expected)
 
 
 if __name__ == '__main__':
