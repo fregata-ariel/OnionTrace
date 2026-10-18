@@ -117,3 +117,13 @@ T4 adds canonical function types, parameter counts, semantic argument values
 conditional candidates), lexical call conditions and validated `thread_api`
 contracts. Existing v1 fields and the local CFG adapter are preserved. Older
 v1 extraction files must be re-extracted for [T4](thread-entrypoints.md).
+
+## T5 additive fields
+
+T5 adds `callback_writes` (scoped owner/write IDs, target and value shapes,
+conditions and ranges), `callee_value` and `callback_api`. Semantic values add
+NULL, local declaration references, record initializers, member references and
+call-result arguments. These are source facts, not points-to results. The
+[callback context adapter](callback-contexts.md) requires fresh T5 extraction,
+keeps storage/alias alternatives unknown and dispatch associations as candidates.
+The v1 local CFG adapter and T4 remain compatible with the additive fields.

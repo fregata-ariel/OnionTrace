@@ -101,3 +101,6 @@ CFG・型・呼出し箇所・マクロ位置を構造化します。未解決�
 既存の再構成・推薦との対応を検証します。通常デモのテキスト取込は比較用に継続します。
 
 M1/T4のmainからスレッド開始関数への静的経路抽出は[thread-entrypoints](docs/thread-entrypoints.md)を参照。
+
+M1/T5のActor・task callback登録／投入／実行候補とinline条件・スレッド役割は
+[callback-contexts](docs/callback-contexts.md)を参照。候補・NULL・未解決とQueue別名の不確実性を保持します。

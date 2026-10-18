@@ -17,6 +17,7 @@ from onion.build_inputs import query
 from onion.libtooling import extract_manifest
 from onion.build_inputs import collect
 from onion.threads import build_threads
+from onion.callbacks import build_callbacks
 
 
 class Tee:
@@ -88,6 +89,17 @@ def main():
         (output / 'threads' / (name + '.json')).write_text(json.dumps(value, indent=2) + '\n')
     if not thread_graph['ready'] or any(not g['spawns'] for g in thread_graph['graphs']):
         raise RuntimeError('Thread fixture extraction failed')
+    callback_build = output / 'callbacks/build'
+    query(callback_build)
+    subprocess.run(['cmake', '-S', str(ROOT / 'fixture/callbacks'), '-B', str(callback_build),
+                    '-G', 'Ninja', '-DCMAKE_C_COMPILER=' + options.cc], check=True)
+    callback_manifest = collect(callback_build, ['nr-softmodem', 'nr-uesoftmodem'])
+    callback_extraction = extract_manifest(callback_manifest, tool, output / 'callbacks/extraction')
+    callback_graph = build_callbacks(callback_manifest, callback_extraction)
+    for name, value in [('manifest', callback_manifest), ('callbacks', callback_graph)]:
+        (output / 'callbacks' / (name + '.json')).write_text(json.dumps(value, indent=2) + '\n')
+    if not callback_graph['ready'] or any(not g['registrations'] for g in callback_graph['graphs']):
+        raise RuntimeError('Callback fixture extraction failed')
     suite = unittest.defaultTestLoader.discover(str(ROOT / 'tests'), pattern='test_*.py')
     with (output / 'tests.log').open('w') as log:
         result = unittest.TextTestRunner(stream=Tee(sys.stdout, log), verbosity=2).run(suite)
