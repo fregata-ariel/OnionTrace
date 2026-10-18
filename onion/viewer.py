@@ -34,7 +34,22 @@ def project_workspace(workspace):
                       for e in function['edges']],
             'uncertainties': copy.deepcopy(function.get('uncertainties', [])),
             'provenance': {'compilation_id': source['compilation_id'],
-                           'clang_version': raw.get('clang_version'), 'range': function.get('range')}}
+                           'clang_version': raw.get('clang_version'), 'range': function.get('range'),
+                           'complete': raw.get('complete'), 'limitations': copy.deepcopy(raw.get('limitations', []))}}
+        # Display the entry neighborhood first even when Clang emits exit-first
+        # block order. Keep unreachable blocks for later pages and inspection.
+        by_id = {n['id']: n for n in cfgs[fid]['nodes']}
+        outgoing = {}
+        for edge in cfgs[fid]['edges']:
+            outgoing.setdefault(edge['source'], []).append(edge['target'])
+        order = [n['id'] for n in cfgs[fid]['nodes'] if n['entry']]
+        reached = set(order)
+        for node in order:
+            for successor in outgoing.get(node, []):
+                if successor not in reached:
+                    reached.add(successor)
+                    order.append(successor)
+        cfgs[fid]['nodes'] = [by_id[n] for n in order] + [n for n in by_id.values() if n['id'] not in reached]
     links = copy.deepcopy(workspace['structure']['relations'])
     locations = {e['id']: e['identity'] for e in workspace['structure']['entities'] if e['kind'] == 'location'}
     for link in links:

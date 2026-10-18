@@ -6,11 +6,11 @@ const resolutionNames={resolved:'静的接続',candidate:'静的候補',unresolv
 function executionView(){return state.mode.startsWith('structure:')?(DATA.execution_views||[])[Number(state.mode.split(':')[1])]:null;}
 function executionState(){const view=executionView();if(!executionStates.has(view.id))executionStates.set(view.id,{expanded:new Set(),pages:new Map(),entity:view.roots[0]||null,link:null,cfg:null,block:null,cfgLimit:60});return executionStates.get(view.id);}
 function executionModel(){const view=executionView(),s=executionState(),model=view.cfgs[s.cfg];if(!model)return {nodes:[],edges:[],function:'未選択'};const nodes=model.nodes.slice(0,s.cfgLimit),ids=new Set(nodes.map(n=>n.id));return {...model,nodes,edges:model.edges.filter(e=>ids.has(e.source)&&ids.has(e.target))};}
-function entityLabel(view,id){const entity=view.entities.find(e=>e.id===id);return entity?.label||entity?.kind+' '+id?.slice(-8)||'未解決の端点';}
+function entityLabel(view,id){const entity=view.entities.find(e=>e.id===id);return entity?(entity.label||entity.kind+' '+id.slice(-8)):'未解決の端点';}
 function executionLinks(view,id){const entity=view.entities.find(e=>e.id===id);return view.links.filter(l=>l.source===id||(l.target===id&&(entity?.kind==='queue'||l.source===null)));}
 function badge(resolution){return el('span',resolutionNames[resolution]||resolution,'evidence-badge '+resolution);}
 function selectExecution(id,link){const s=executionState();s.entity=id;s.link=link?.id||null;renderExecution();}
-function openExecutionCFG(fid){const s=executionState();if(s.cfg!==fid){s.cfg=fid;s.block=null;s.cfgLimit=60;}state.selected=s.block;renderExecution();$('graph-title').scrollIntoView?.({block:'start',behavior:'smooth'});}
+function openExecutionCFG(fid,reference=null){const s=executionState();s.reference=reference;if(s.cfg!==fid){s.cfg=fid;s.block=null;s.cfgLimit=60;}state.selected=s.block;renderExecution();$('graph-title').scrollIntoView?.({block:'start',behavior:'smooth'});}
 function renderStructureTree(view,s){
  const container=$('structure-tree');container.replaceChildren();let count=0,limited=false;
  function branch(id,link,path,ancestors){
@@ -46,7 +46,7 @@ function renderExecution(){
  if(entity?.kind==='function'&&view.cfgs[entity.id]){const button=el('button','CFGを開く: '+entityLabel(view,entity.id));button.onclick=()=>openExecutionCFG(entity.id);choices.append(button);}
  // Preserve reference IDs and relation context even when two choices lead to
  // the same function (e.g. Queue ends or different callback alternatives).
- refs.forEach(ref=>{const button=el('button',`CFGを開く: ${entityLabel(view,ref.function_id)} / ${ref.category}`);button.dataset.reference=ref.id;button.onclick=()=>{s.reference=ref.id;openExecutionCFG(ref.function_id);};choices.append(button);});
+ refs.forEach(ref=>{const button=el('button',`CFGを開く: ${entityLabel(view,ref.function_id)} / ${ref.category}`);button.dataset.reference=ref.id;button.onclick=()=>openExecutionCFG(ref.function_id,ref.id);choices.append(button);});
  if(!choices.children.length)choices.append(el('p','対応する関数CFGは未解決です。根拠と未解決理由を保持しています。','tiny warn'));
  const selectedRef=view.references.find(r=>r.id===s.reference&&r.function_id===s.cfg);
  $('structure-evidence').textContent=JSON.stringify({structure_id:view.structure_id,build_id:view.build_id,entity,connection:link,reference:selectedRef,related_references:refs,
@@ -62,6 +62,6 @@ function renderExecution(){
  if(model)$('selection-context').textContent+=` CFG ${Math.min(model.nodes.length,s.cfgLimit)} / ${model.nodes.length} ブロック表示。非同期接続はCFG辺に含めません。`;
 }
 (DATA.execution_views||[]).forEach((view,i)=>{const option=el('option',`構造: ${view.target}（静的）`);option.value='structure:'+i;$('mode').append(option);});
-if(!DATA.stages.length)$('mode').querySelector('option[value="fixture"]').remove();
+if(!DATA.stages.length){$('mode').querySelector('option[value="fixture"]').remove();document.querySelector('h1').textContent='mainから処理構造を開く';document.querySelector('header p').textContent='ソース上の静的接続・候補・未解決をたどり、関数内CFGと根拠を確認する';}
 $('collapse-structure').onclick=()=>{executionState().expanded.clear();renderExecution();};
 $('return-runtime').onclick=()=>{$('mode').value='fixture';$('mode').dispatchEvent(new Event('change'));};

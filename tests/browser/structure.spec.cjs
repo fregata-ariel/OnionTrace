@@ -72,6 +72,18 @@ test('collapse and target switches retain selected CFG, block, reference and run
   await expect(page.locator('#graph .node.selected')).toHaveAttribute('aria-label',fixtureBlock);
   await expect(page.locator('.node.inferred')).toHaveCount(0);
 });
+test('runtime skeleton, CFG and timeline share the selected job and observed site',async({page})=>{
+  await page.locator('#stages button').nth(2).click();
+  await page.locator('#job').selectOption('1');
+  const anchor=page.getByRole('button',{name:'直接観測: work.begin / job 1',exact:true});
+  const index=Number(await anchor.getAttribute('data-event'));
+  await anchor.click();
+  await expect(page.locator('#cursor')).toHaveValue(String(index+1));
+  await expect(page.locator('#graph .node.selected')).toContainText('work.begin');
+  await expect(page.locator('#timeline .tick.focus')).toHaveCount(1);
+  await expect(page.locator('#job')).toHaveValue('1');
+  await expect(page.locator('.node.inferred')).toHaveCount(0);
+});
 test('standalone structure is offline, keyboard accessible and fits a narrow viewport',async({page},testInfo)=>{
   await page.goto(url('structure-only.html'));
   await page.setViewportSize({width:390,height:844});
@@ -86,4 +98,32 @@ test('standalone structure is offline, keyboard accessible and fits a narrow vie
   await page.screenshot({path:testInfo.outputPath('structure-mobile.png'),fullPage:true});
   await page.setViewportSize({width:1440,height:1100});
   await page.screenshot({path:testInfo.outputPath('structure-desktop.png'),fullPage:true});
+});
+test('large branches and CFGs only render requested pages and preserve cyclic references',async({page})=>{
+  await page.goto(url('structure-only.html'));
+  await page.evaluate(()=>{
+    const v=DATA.execution_views[0],root=v.roots[0],sample=v.links[0];
+    for(let i=0;i<90;i++){
+      const id='large/function/'+i;
+      v.entities.push({id,kind:'function',label:'extra '+i});
+      v.links.push({...sample,id:'large/link/'+i,source:root,target:id});
+    }
+    v.links.push({...sample,id:'large/cycle',source:root,target:root});
+    const cfg=v.cfgs[root];
+    cfg.nodes=Array.from({length:125},(_,i)=>({id:'large/block/'+i,clang_id:'B'+i,entry:i===0,exit:i===124,sites:[],source_block:{elements:[]}}));
+    cfg.edges=cfg.nodes.slice(1).map((n,i)=>({source:cfg.nodes[i].id,target:n.id}));
+  });
+  await page.getByRole('button',{name:'main を展開・折り畳み',exact:true}).click();
+  expect(await page.locator('#structure-tree .pick').count()).toBeLessThanOrEqual(17);
+  const more=page.getByRole('button',{name:/^さらに表示/});
+  await expect(more).toBeVisible();
+  while(await more.count())await more.click();
+  await expect(page.locator('#structure-tree')).toContainText('循環参照');
+  await page.locator('#structure-references button').filter({hasText:'CFGを開く: main'}).click();
+  await expect(page.locator('#graph .node')).toHaveCount(60);
+  await page.locator('#cfg-more').click();
+  await expect(page.locator('#graph .node')).toHaveCount(120);
+  await page.locator('#cfg-more').click();
+  await expect(page.locator('#graph .node')).toHaveCount(125);
+  await expect(page.locator('#cfg-more')).toHaveCount(0);
 });
