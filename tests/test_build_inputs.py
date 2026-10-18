@@ -71,6 +71,16 @@ class BuildInputTests(unittest.TestCase):
         self.assertEqual(subset['context']['analysis_scope']['kind'], 'explicit_source_subset')
         self.assertTrue(all('not analyzed' in r['reason'] for r in subset['entries']
                             if r['status'] == 'excluded' and r['selected_by']))
+        for row in subset['entries']:
+            if row['status'] != 'excluded':
+                continue
+            self.assertIn(row['raw'], [e['raw'] for e in whole['entries']])
+            reference = row['target']['compile_group_reference']
+            target = json.loads(Path(reference['json_file']).read_text())
+            self.assertEqual(target['compileGroups'][reference['index']],
+                             next(e['target']['compile_group'] for e in whole['entries']
+                                  if e['raw'] == row['raw']) if row['selected_by'] else
+                             target['compileGroups'][reference['index']])
 
     def test_requested_source_outside_target_closure_or_missing_db_is_failure(self):
         result = collect(self.build, ['nr-softmodem', 'nr-uesoftmodem'], sources=['unrelated.c'])
