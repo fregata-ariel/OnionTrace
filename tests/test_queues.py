@@ -129,6 +129,12 @@ class QueueNativeTests(unittest.TestCase):
                             for r in self.graph['relations']))
         self.assertTrue(any(r['kind'] == 'completion_candidate' and r['source'] == process['id']
                             for r in self.graph['relations']))
+        completion = self.ops('enqueue', 'rx_func')[0]
+        wait = self.ops('dequeue', 'wait_free_rx_tti')[0]
+        self.assertTrue(any(r['kind'] == 'transfers' and r['source'] == completion['id'] and r['target'] == wait['id']
+                            for r in self.graph['relations']))
+        self.assertFalse(completion['queue_candidates'][0]['concrete'])
+        self.assertTrue(completion['queue_candidates'][0]['via'])
 
     def test_blocked_sites_and_incompatible_api_are_not_connected(self):
         blocked = [o for o in self.operations.values() if o['blocked']]
@@ -215,6 +221,19 @@ class QueueValueTests(unittest.TestCase):
         self.assertFalse(a['concrete'])
         c = _references(member('Different.fifo', 'arg2'))[0]
         self.assertFalse(_compatible(a, c))
+
+    def test_pointer_field_indirection_keeps_final_family_and_original_path(self):
+        def field(base, name, pointer=False):
+            return {'shape': 'member', 'base': base, 'field_usr': name, 'field_name': name,
+                    'arrow': True, 'pointer': pointer}
+        root = {'shape': 'storage', 'scope': 'tu', 'usr': 'info', 'pointer': True}
+        payload = field(field(root, 'Payload.gNB', True), 'Gnb.fifo')
+        global_path = field(field(root, 'RC.gNB', True), 'Gnb.fifo')
+        a, b = _references(payload)[0], _references(global_path)[0]
+        self.assertEqual([f['usr'] for f in a['fields']], ['Gnb.fifo'])
+        self.assertNotEqual(a['via']['fields'], b['via']['fields'])
+        self.assertTrue(_compatible(a, b))
+        self.assertFalse(a['concrete'])
 
     def test_cycle_is_bounded_and_unknown(self):
         p = {'shape': 'storage', 'scope': 'tu', 'usr': 'p', 'pointer': True}

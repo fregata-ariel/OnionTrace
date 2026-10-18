@@ -1,6 +1,8 @@
 #include "queues.h"
 Owner first, second;
-notifiedFIFO_t resp_L1, L1_rx_out;
+typedef struct { notifiedFIFO_t resp_L1, L1_rx_out; } Gnb;
+typedef struct { Gnb *gNB; } RxData;
+Gnb gnb;
 extern notifiedFIFO_t *unknown_queue(void);
 extern void change_queue(notifiedFIFO_t **);
 static void process(void *p) { (void)p; }
@@ -19,16 +21,17 @@ static void *actor_thread(void *arg) {
   return NULL;
 }
 static void rx_func(void *info) {
-  (void)info;
-  notifiedFIFO_elt_t *e = newNotifiedFIFO_elt(4, 0, &L1_rx_out, NULL);
-  pushNotifiedFIFO(&L1_rx_out, e);
+  Gnb *node = ((RxData *)info)->gNB;
+  notifiedFIFO_elt_t *e = newNotifiedFIFO_elt(sizeof(RxData), 0, &node->L1_rx_out, NULL);
+  pushNotifiedFIFO(&node->L1_rx_out, e);
 }
 static void *L1_rx_thread(void *arg) {
-  (void)arg;
-  notifiedFIFO_elt_t *e = pullNotifiedFIFO(&resp_L1);
+  Gnb *node = (Gnb *)arg;
+  notifiedFIFO_elt_t *e = pullNotifiedFIFO(&node->resp_L1);
   if (e) { void *info = NotifiedFifoData(e); rx_func(info); delNotifiedFIFO_elt(e); }
   return NULL;
 }
+static void wait_free_rx_tti(notifiedFIFO_t *q) { pullNotifiedFIFO(q); }
 void opaque(notifiedFIFO_t *q, int choose) {
   notifiedFIFO_t *p = &first.fifo;
   if (choose) p = q;
@@ -59,11 +62,12 @@ int main(void) {
   pullNotifiedFIFO(&second.fifo);
   modified(&first.fifo);
   opaque(&first.fifo, 1);
-  initNotifiedFIFO(&resp_L1); initNotifiedFIFO(&L1_rx_out);
-  notifiedFIFO_elt_t *e = newNotifiedFIFO_elt(4, 0, &resp_L1, NULL);
-  pushNotifiedFIFO(&resp_L1, e);
-  threadCreate(&c, L1_rx_thread, NULL, "rx", 0, 0);
-  pullNotifiedFIFO(&L1_rx_out);
+  initNotifiedFIFO(&gnb.resp_L1); initNotifiedFIFO(&gnb.L1_rx_out);
+  notifiedFIFO_elt_t *e = newNotifiedFIFO_elt(sizeof(RxData), 0, &gnb.resp_L1, NULL);
+  RxData *data = NotifiedFifoData(e); data->gNB = &gnb;
+  pushNotifiedFIFO(&gnb.resp_L1, e);
+  threadCreate(&c, L1_rx_thread, &gnb, "rx", 0, 0);
+  wait_free_rx_tti(&gnb.L1_rx_out);
   abortNotifiedFIFO(&first.fifo);
   if (0) pushNotifiedFIFO(&second.fifo, e);
   return 0;

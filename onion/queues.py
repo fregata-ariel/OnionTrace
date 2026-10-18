@@ -122,17 +122,30 @@ def _references(v):
             refs = [{'base': None, 'fields': [], 'indices': [], 'concrete': False,
                      'reason': 'computed base object is unresolved'}]
         for r in refs:
+            if v.get('arrow') and r.get('pointer_field'):
+                # A pointer-valued field is a new object indirection. Retain
+                # its storage path as provenance, not as embedded-object fields
+                # of the pointee. info->gNB->fifo and RC.gNB[0]->fifo share the
+                # final field family while their actual gNB alias is unknown.
+                previous = copy.deepcopy(r)
+                r.clear()
+                r.update(base=None, fields=[], indices=[], concrete=False,
+                         reason='pointer field/array pointee is unresolved', via=previous)
             r['fields'].append({'usr': v['field_usr'], 'name': v['field_name']})
             # A pointer field is another indirection, not embedded storage.
             if v.get('pointer'):
                 r['concrete'] = False
                 r['reason'] += '; pointer field pointee unresolved'
+            r['pointer_field'] = bool(v.get('pointer'))
         return refs
     if shape == 'index':
         refs = _references(v['base'])
         index = v['index'].get('literal') if v['index'].get('shape') == 'integer' else None
         for r in refs:
             r['indices'].append(index)
+            if v.get('pointer'):
+                r['concrete'] = False
+                r['pointer_field'] = True
             if index is None:
                 r['concrete'] = False
                 r['reason'] += '; dynamic index does not identify a runtime instance'
