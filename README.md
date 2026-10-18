@@ -85,7 +85,7 @@ push（main）、pull request、手動実行でGitHub Actionsが動作します�
 設計と制約は[docs/prototype-v0.1.md](docs/prototype-v0.1.md)、JSON境界は[CONTRACT.md](CONTRACT.md)に記載しています。
 
 M1の[実行構造契約](docs/execution-structure.md)では、関数・スレッド役割・論理Queue・callbackと型付き接続を定義しています。
-現在は手書きfixtureによる境界検証の段階です。OAIからの構造抽出と既存探索器への接続は後続のIssueで実装します。
+T4〜T6の静的抽出をT7の接続層で共通構造と関数内探索へつなぎます。固定版OAIの総合検証は#11で扱います。
 
 OAIのCFGは別途取得した場合だけ`python3 -m onion.demo --oai-dump /path/to/cfg --out out`で表示できます。
 外部コーパスの検査は`ONION_OAI_CFG_DIR=/path/to/cfg python3 -m unittest discover -s tests_optional -v`です。
@@ -108,3 +108,7 @@ M1/T5のActor・task callback登録／投入／実行候補とinline条件・ス
 M1/T6のnotifiedFIFOの投入・取得・応答先、論理Queueの基底オブジェクト／引数と
 公開・取得・所有権の境界は[notified-fifo](docs/notified-fifo.md)を参照。
 固定gNB経路のソース根拠と、#11用の実抽出検証gateを含みます。
+
+M1/T7の[実行構造と区間探索の接続](docs/model-integration.md)では、スレッド・Queue・callbackから
+関数内区間を選択し、区間ごとのplan/runと候補の出典を保持します。非同期接続はCFGへ追加せず、
+候補・未解決部分はCoreの不完全性として渡します。

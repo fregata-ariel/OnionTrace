@@ -168,11 +168,12 @@ def validate_extraction(raw):
     return raw
 
 
-def build_model(raw, function, sites, build_id, provenance):
+def build_model(raw, function, sites, build_id, provenance, *, anchors=('work.begin', 'work.end')):
     """Adapt one native function to the unchanged function-local Core API.
 
     Probe markers bind to semantic DeclRefExpr symbols, never printed strings.
-    T9 will connect this boundary to the full execution_structure model.
+    T7 connects this boundary to the full execution_structure model. Explicit
+    anchor pairs support nested regions without changing the default demo.
     """
     validate_extraction(raw)
     matches = [f for f in raw['functions'] if function in (f['id'], f['name'], f['qualified_name'])]
@@ -203,7 +204,9 @@ def build_model(raw, function, sites, build_id, provenance):
         node, index = hits[0]
         mapped.append({**copy.deepcopy(site), 'node': node, 'expression_index': index})
     by_id = {s['id']: s for s in mapped}
-    for anchor in ('work.begin', 'work.end'):
+    if len(anchors) != 2 or anchors[0] == anchors[1]:
+        raise ValueError('select two distinct region anchors')
+    for anchor in anchors:
         if anchor not in by_id or not by_id[anchor].get('anchor'):
             raise ValueError('required anchor missing or not marked anchor: ' + anchor)
     return {'schema_version': 1, 'build_id': build_id,
@@ -213,7 +216,7 @@ def build_model(raw, function, sites, build_id, provenance):
             'function': function['name'], 'function_id': function['id'], 'signature': function['type'],
             'nodes': nodes, 'edges': copy.deepcopy(function['edges']),
             'uncertainties': copy.deepcopy(function['uncertainties']),
-            'region': {'entry': by_id['work.begin']['node'], 'exit': by_id['work.end']['node']}, 'sites': mapped}
+            'region': {'entry': by_id[anchors[0]]['node'], 'exit': by_id[anchors[1]]['node']}, 'sites': mapped}
 
 
 def main():
