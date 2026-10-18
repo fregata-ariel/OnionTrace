@@ -109,6 +109,8 @@ test('large branches and CFGs only render requested pages and preserve cyclic re
       v.links.push({...sample,id:'large/link/'+i,source:root,target:id});
     }
     v.links.push({...sample,id:'large/cycle',source:root,target:root});
+    const ref=v.references[0];
+    for(let i=0;i<80;i++)v.references.push({...ref,id:'large/ref/'+i,origin_id:root,function_id:root,category:'large'});
     const cfg=v.cfgs[root];
     cfg.nodes=Array.from({length:125},(_,i)=>({id:'large/block/'+i,clang_id:'B'+i,entry:i===0,exit:i===124,sites:[],source_block:{elements:[]}}));
     cfg.edges=cfg.nodes.slice(1).map((n,i)=>({source:cfg.nodes[i].id,target:n.id}));
@@ -119,7 +121,10 @@ test('large branches and CFGs only render requested pages and preserve cyclic re
   await expect(more).toBeVisible();
   while(await more.count())await more.click();
   await expect(page.locator('#structure-tree')).toContainText('循環参照');
-  await page.locator('#structure-references button').filter({hasText:'CFGを開く: main'}).click();
+  await expect(page.locator('#structure-references button')).toHaveCount(18);
+  await page.getByRole('button',{name:/^参照をさらに表示/}).click();
+  await expect(page.locator('#structure-references button')).toHaveCount(34);
+  await page.getByRole('button',{name:'CFGを開く: main',exact:true}).click();
   await expect(page.locator('#graph .node')).toHaveCount(60);
   await page.locator('#cfg-more').click();
   await expect(page.locator('#graph .node')).toHaveCount(120);

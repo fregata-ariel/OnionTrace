@@ -9,7 +9,7 @@ function executionModel(){const view=executionView(),s=executionState(),model=vi
 function entityLabel(view,id){const entity=view.entities.find(e=>e.id===id);return entity?(entity.label||entity.kind+' '+id.slice(-8)):'未解決の端点';}
 function executionLinks(view,id){const entity=view.entities.find(e=>e.id===id);return view.links.filter(l=>l.source===id||(l.target===id&&(entity?.kind==='queue'||l.source===null)));}
 function badge(resolution){return el('span',resolutionNames[resolution]||resolution,'evidence-badge '+resolution);}
-function selectExecution(id,link){const s=executionState();s.entity=id;s.link=link?.id||null;renderExecution();}
+function selectExecution(id,link){const s=executionState();s.entity=id;s.link=link?.id||null;s.refLimit=16;renderExecution();}
 function openExecutionCFG(fid,reference=null){const s=executionState();s.reference=reference;if(s.cfg!==fid){s.cfg=fid;s.block=null;s.cfgLimit=60;}state.selected=s.block;renderExecution();$('graph-title').scrollIntoView?.({block:'start',behavior:'smooth'});}
 function renderStructureTree(view,s){
  const container=$('structure-tree');container.replaceChildren();let count=0,limited=false;
@@ -41,12 +41,13 @@ function renderExecution(){
  $('stats').replaceChildren(metric('対象',view.target),metric('構造要素',view.entities.length),metric('未解決接続',view.links.filter(l=>l.resolution==='unresolved').length),metric('実行観測','なし'));
  renderStructureTree(view,s);
  $('structure-gaps').textContent=`抽出失敗・不完全性 ${view.incompleteness.length} 件 / 探索frontier ${view.frontiers.length} 件。未展開の枝も静的候補として保持します。`;
- $('structure-selection').replaceChildren(el('p',entity?entityLabel(view,entity.id):'未解決の端点','structure-meta'),badge(link?.resolution||'resolved'));
+ $('structure-selection').replaceChildren(el('p',entity?entityLabel(view,entity.id):'未解決の端点','structure-meta'),badge(link?.resolution||(entity?'resolved':'unresolved')));
  const refs=view.references.filter(r=>r.origin_id===s.entity||r.origin_id===s.link),choices=$('structure-references');choices.replaceChildren();
  if(entity?.kind==='function'&&view.cfgs[entity.id]){const button=el('button','CFGを開く: '+entityLabel(view,entity.id));button.onclick=()=>openExecutionCFG(entity.id);choices.append(button);}
  // Preserve reference IDs and relation context even when two choices lead to
  // the same function (e.g. Queue ends or different callback alternatives).
- refs.forEach(ref=>{const button=el('button',`CFGを開く: ${entityLabel(view,ref.function_id)} / ${ref.category}`);button.dataset.reference=ref.id;button.onclick=()=>openExecutionCFG(ref.function_id,ref.id);choices.append(button);});
+ refs.slice(0,s.refLimit||16).forEach(ref=>{const button=el('button',`CFGを開く: ${entityLabel(view,ref.function_id)} / ${ref.category}`);button.dataset.reference=ref.id;button.onclick=()=>openExecutionCFG(ref.function_id,ref.id);choices.append(button);});
+ if(refs.length>(s.refLimit||16)){const more=el('button',`参照をさらに表示（残り ${refs.length-(s.refLimit||16)} 件）`);more.onclick=()=>{s.refLimit=(s.refLimit||16)+16;renderExecution();};choices.append(more);}
  if(!choices.children.length)choices.append(el('p','対応する関数CFGは未解決です。根拠と未解決理由を保持しています。','tiny warn'));
  const selectedRef=view.references.find(r=>r.id===s.reference&&r.function_id===s.cfg);
  $('structure-evidence').textContent=JSON.stringify({structure_id:view.structure_id,build_id:view.build_id,entity,connection:link,reference:selectedRef,related_references:refs,

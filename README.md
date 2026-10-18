@@ -112,7 +112,8 @@ M1/T6のnotifiedFIFOの投入・取得・応答先、論理Queueの基底オブ�
 M1/T7の[実行構造と区間探索の接続](docs/model-integration.md)では、スレッド・Queue・callbackから
 関数内区間を選択し、区間ごとのplan/runと候補の出典を保持します。非同期接続はCFGへ追加せず、
 候補・未解決部分はCoreの不完全性として渡します。
-# M1/T8 structure viewer
+
+## M1/T8 structure viewer
 
 T7のworkspaceから両main・スレッド・Queue・callbackを段階展開し、関連する関数内CFGを
 オフラインで開けます。[入力・操作・証拠の意味](docs/structure-viewer.md)を参照してください。
