@@ -13,6 +13,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,13 +28,42 @@ LINK_ONLY_ARGUMENTS = ('-rdynamic',)
 
 
 def digest(value):
-    return "sha256:" + sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
-                                       ensure_ascii=True).encode()).hexdigest()
+    # Preserve canonical bytes without allocating the entire JSON twice.
+    hasher = sha256()
+    parts, size = [], 0
+    encoder = json.JSONEncoder(sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    for part in encoder.iterencode(value):
+        parts.append(part)
+        size += len(part)
+        if size >= 1024 * 1024:
+            hasher.update(''.join(parts).encode())
+            parts, size = [], 0
+    hasher.update(''.join(parts).encode())
+    return 'sha256:' + hasher.hexdigest()
+
+
+def read_json(path):
+    """Share repeated immutable path/identity strings in large native records."""
+    def share(record):
+        for key, value in record.items():
+            if isinstance(value, str) and len(value) < 1024:
+                record[key] = sys.intern(value)
+            elif isinstance(value, list):
+                for index, item in enumerate(value):
+                    if isinstance(item, str) and len(item) < 1024:
+                        value[index] = sys.intern(item)
+        return record
+    with Path(path).open() as stream:
+        return json.load(stream, object_hook=share)
 
 
 def file_record(path):
     path = Path(path).resolve()
-    return {"path": str(path), "sha256": "sha256:" + sha256(path.read_bytes()).hexdigest()}
+    hasher = sha256()
+    with path.open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            hasher.update(block)
+    return {"path": str(path), "sha256": "sha256:" + hasher.hexdigest()}
 
 
 def run(arguments, cwd=None):
@@ -340,6 +370,16 @@ def collect(build, names, *, configuration=None, oai=False, dependency_lock=None
             'scope': 'only listed TUs are analyzed; other target TUs remain excluded with reasons'}
     cache_context = digest(context)
     entries, compilers, matched, selected_sources = [], {}, set(), set()
+    def exclude(row, reason):
+        # The exact original command remains in raw. Large compile groups are
+        # already retained/hash-verified in the File API provenance; reference
+        # them for unanalyzed entries instead of duplicating them per TU.
+        row.update(status='excluded', reason=reason)
+        row.pop('arguments')
+        row['target'].pop('compile_group')
+        row['target']['compile_group_reference'] = {
+            'json_file': row['target']['json_file'],
+            'index': row['target']['source']['compileGroupIndex']}
     for number, entry in enumerate(json.loads((build / "compile_commands.json").read_text())):
         row = {"index": number, "raw": entry, "status": "failed", "reason": None}
         try:
@@ -354,12 +394,12 @@ def collect(build, names, *, configuration=None, oai=False, dependency_lock=None
                                "source": target_source, "compile_group": group},
                        selected_by=members.get(target["id"], []))
             if target["id"] not in members:
-                row.update(status="excluded", reason="outside selected target dependency closure")
+                exclude(row, 'outside selected target dependency closure')
                 entries.append(row)
                 continue
             selected_sources.add(path)
             if requested is not None and path not in requested:
-                row.update(status="excluded", reason="outside explicit analysis source subset; not analyzed")
+                exclude(row, 'outside explicit analysis source subset; not analyzed')
                 entries.append(row)
                 continue
             if group["language"] not in ("C", "CXX"):
