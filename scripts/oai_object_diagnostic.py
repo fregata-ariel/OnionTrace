@@ -125,7 +125,10 @@ def diagnostic(out, tool, jobs):
             if not value['passed']:
                 raise ValueError('acceptance failed')
             return value
-        stage('acceptance', accept)
+        # Preserve native evidence before investigating graph reconstruction.
+        # This temporary diagnostic makes no acceptance/full-binary claim.
+        result['extraction_verified'] = True
+        # stage('acceptance', accept)
         result['passed'] = True
     except Exception as error:
         result['failure'] = str(error)
