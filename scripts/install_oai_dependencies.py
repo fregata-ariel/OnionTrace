@@ -12,6 +12,20 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def simde_environment(destination):
+    destination = Path(destination).resolve()
+    source = destination / 'source'
+    # simde-no-tests has x86/ at its root. OAI includes <simde/x86/...>.
+    if not (source / 'x86/gfni.h').is_file():
+        raise ValueError('SIMDe checkout lacks required gfni.h')
+    (destination / 'include').mkdir()
+    (destination / 'include/simde').symlink_to(source, target_is_directory=True)
+    # Match build_helper's system-header installation. CPATH is a user -I
+    # path and would ask LibTooling to emit thousands of third-party intrinsics.
+    return {variable: os.pathsep.join(filter(None, [str(destination / 'include'), os.environ.get(variable)]))
+            for variable in ('C_INCLUDE_PATH', 'CPLUS_INCLUDE_PATH')}
+
+
 def install(prefix, jobs):
     prefix = Path(prefix).resolve()
     prefix.mkdir(parents=True, exist_ok=False)
@@ -38,18 +52,9 @@ def install(prefix, jobs):
                 run(['make', '-j' + str(jobs)], source)
                 run(['make', 'install'], source)
             elif row['name'] == 'simde':
-                # simde-no-tests has x86/ at its root. OAI includes
-                # <simde/x86/...>, matching build_helper's /usr/include/simde.
-                if not (source / 'x86/gfni.h').is_file():
-                    raise ValueError('SIMDe checkout lacks required gfni.h')
-                (destination / 'include').mkdir()
-                (destination / 'include/simde').symlink_to(source, target_is_directory=True)
+                environment.update(simde_environment(destination))
             environment['ONION_' + row['name'].upper()] = str(destination)
     environment['PATH'] = str(prefix / 'asn1c/bin') + os.pathsep + os.environ['PATH']
-    # Match build_helper's system-header installation. CPATH is a user -I
-    # path and would ask LibTooling to emit thousands of third-party intrinsics.
-    for variable in ('C_INCLUDE_PATH', 'CPLUS_INCLUDE_PATH'):
-        environment[variable] = os.pathsep.join(filter(None, [str(prefix / 'simde/include'), os.environ.get(variable)]))
     (prefix / 'environment.json').write_text(json.dumps(environment, indent=2) + '\n')
     if os.environ.get('GITHUB_ENV'):
         with Path(os.environ['GITHUB_ENV']).open('a') as stream:

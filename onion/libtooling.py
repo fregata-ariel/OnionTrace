@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 
 from .build_inputs import (ENVIRONMENT, command, compiler_record, digest, file_record,
-                           run, validate_entry, validation_args)
+                           run, validate_entry, validation_args, LINK_ONLY_ARGUMENTS)
 
 
 WARNINGS = ['-Werror=unknown-warning-option', '-Werror=unused-command-line-argument',
@@ -89,6 +89,7 @@ def extract_manifest(manifest, tool, out):
             tooling_args = [args[0], *flags, *additions]
             result.update(original_arguments=args, tooling_arguments=tooling_args,
                           adjustments={'removed': 'compile/dependency output switches only',
+                                       'removed_link_arguments': [a for a in args[1:] if a in LINK_ONLY_ARGUMENTS],
                                        'added': additions, 'tooling': 'ClangTool syntax-only/output adjusters'},
                           validation_diagnostics=diagnostics)
             raw_path = out / f'entry-{ordinal}.json'

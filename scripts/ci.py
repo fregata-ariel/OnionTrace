@@ -125,6 +125,7 @@ def main():
     workspace = connect(integration_manifest, integration_extraction, 'integration_fixture')
     for name, value in [('manifest', integration_manifest), ('workspace', workspace), ('structure', workspace['structure'])]:
         (output / 'integration' / (name + '.json')).write_text(json.dumps(value, indent=2) + '\n')
+    export_viewer([workspace], output / 'integration/structure.html')
     viewer_build = output / 'structure-viewer/build'
     query(viewer_build)
     subprocess.run(['cmake', '-S', str(ROOT / 'fixture/structure-viewer'), '-B', str(viewer_build),

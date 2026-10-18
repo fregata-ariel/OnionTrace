@@ -21,6 +21,9 @@ QUERIES = ("codemodel-v2", "cache-v2", "cmakeFiles-v1", "toolchains-v1")
 ENVIRONMENT = ("PATH", "CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "OBJC_INCLUDE_PATH",
                "SDKROOT", "COMPILER_PATH", "GCC_EXEC_PREFIX", "LIBRARY_PATH", "SOURCE_DATE_EPOCH",
                "CPM_SOURCE_CACHE", "SIMDE_VERSION", "LD_LIBRARY_PATH", "LANG", "LC_ALL")
+# OAI puts this ELF linker switch in CMAKE_C_FLAGS. It has no preprocessing,
+# language, ABI or code-generation effect during a compile-only action.
+LINK_ONLY_ARGUMENTS = ('-rdynamic',)
 
 
 def digest(value):
@@ -168,8 +171,8 @@ def compiler_record(executable, directory):
 
 
 def validation_args(args):
-    # Only remove compile-output/dependency-output switches. All semantic flags
-    # remain, including unknown ones, so the compiler must diagnose them.
+    # Remove output switches and the exact audited link-only allowlist.
+    # All semantic/unknown flags remain so the compiler must diagnose them.
     result, i = [], 1
     while i < len(args):
         arg = args[i]
@@ -180,7 +183,7 @@ def validation_args(args):
                 raise ValueError(f"missing argument for {arg}")
             i += 2
             continue
-        if arg not in ("-c", "-MD", "-MMD", "-MP"):
+        if arg not in ("-c", "-MD", "-MMD", "-MP", *LINK_ONLY_ARGUMENTS):
             result.append(arg)
         i += 1
     return result
@@ -235,7 +238,8 @@ def validate_entry(args, directory, compiler, source):
             raise ValueError("compiler primary input missing from dependency inventory")
         records = [file_record(path) for path in dependencies]
         main_input = next(row for row in records if row["path"] == str(source))
-        return records, completed.stderr, {"main_input": main_input, "compiler_path": str(actual_compiler)}
+        return records, completed.stderr, {"main_input": main_input, "compiler_path": str(actual_compiler),
+            "removed_link_arguments": [a for a in args[1:] if a in LINK_ONLY_ARGUMENTS]}
 
 
 def git_provenance(source, lock):

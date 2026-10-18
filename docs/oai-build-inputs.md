@@ -96,8 +96,11 @@ File APIのソース所属・compileGroupIndexを照合する。File APIの対�
 compile DBの実行体とCMakeCacheの言語別コンパイラを実パスで照合し、launcherや不一致は
 genericでも理由付き`failed`とする。他のcompiler familyは主入力を検証できないため未対応とする。
 
-出力・depfile用の`-c/-o/-MD/-MMD/-MP/-MF/-MT/-MQ/-MJ`のみを検査用に差し替え、
-その他の意味を持つ引数は保持する。`-fsyntax-only -MD`でsystem headerを含む依存を取得する。
+出力・depfile用の`-c/-o/-MD/-MMD/-MP/-MF/-MT/-MQ/-MJ`を検査用に差し替える。
+OAIがCFLAGSへ含めるlink専用の`-rdynamic`だけは構文検査・抽出の引数から除き、
+`validation.removed_link_arguments`と抽出側の`adjustments.removed_link_arguments`へ記録する。
+元の引数・compile DB・hashは保持する。これ以外の意味を持つ引数や未知の引数は保持し、
+未知・未使用引数のerror昇格も維持する。`-fsyntax-only -MD`でsystem headerを含む依存を取得する。
 同時にClangの`-MJ`で実際の主入力・cwd・driverを取得し、主入力が1件だけで、
 compile DBの`file`・実行cwd・記録したコンパイラと一致することを検査する。
 主入力そのものが依存一覧に含まれ、その内容のSHA-256を記録できた場合だけ`validated`とする。

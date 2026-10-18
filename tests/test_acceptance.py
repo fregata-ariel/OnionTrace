@@ -12,6 +12,7 @@ from onion.build_inputs import collect, query, digest
 from onion.libtooling import extract_manifest
 from test_queues import run, ROOT
 from scripts.oai_ci import run_acceptance
+from scripts.install_oai_dependencies import simde_environment
 
 
 class AcceptanceTests(unittest.TestCase):
@@ -29,7 +30,7 @@ class AcceptanceTests(unittest.TestCase):
         build = cls.out / 'build'
         query(build)
         run(['cmake', '-S', ROOT / 'fixture/structure-viewer', '-B', build, '-G', 'Ninja',
-             '-DCMAKE_C_COMPILER=' + os.environ.get('ONION_CLANG', 'clang-18')])
+             '-DCMAKE_C_COMPILER=' + os.environ.get('ONION_CLANG', 'clang-18'), '-DCMAKE_C_FLAGS=-rdynamic -DKEEP_SEMANTIC_FLAG=1'])
         cls.manifest = collect(build, ['nr-softmodem', 'nr-uesoftmodem'])
         cls.extraction = extract_manifest(cls.manifest, tool, cls.out / 'extraction')
 
@@ -37,6 +38,12 @@ class AcceptanceTests(unittest.TestCase):
         destination = self.out / 'acceptance'
         result = export_acceptance(self.manifest, self.extraction, destination)
         self.assertTrue(result['passed'], result)
+        for row in self.extraction['entries']:
+            if row['status'] == 'extracted':
+                self.assertIn('-rdynamic', row['original_arguments'])
+                self.assertNotIn('-rdynamic', row['tooling_arguments'])
+                self.assertIn('-DKEEP_SEMANTIC_FLAG=1', row['tooling_arguments'])
+                self.assertEqual(row['adjustments']['removed_link_arguments'], ['-rdynamic'])
         self.assertFalse(result['full_extraction_verified'])
         self.assertFalse(result['runtime_evidence'])
         self.assertEqual({t['target'] for t in result['targets']}, {'nr-softmodem', 'nr-uesoftmodem'})
@@ -85,6 +92,26 @@ class AcceptanceTests(unittest.TestCase):
         manifest['manifest_id'] = digest({k: v for k, v in manifest.items() if k != 'manifest_id'})
         result = export_acceptance(manifest, self.extraction, self.out / 'recaptured')
         self.assertFalse(result['passed'])
+
+    def test_isolated_simde_layout_keeps_external_headers_out_of_oai_function_definitions(self):
+        destination = self.out / 'isolated-simde'
+        header = destination / 'source/x86/gfni.h'
+        header.parent.mkdir(parents=True)
+        header.write_text('static inline int external_intrinsic(void) { return 7; }\n')
+        source = self.out / 'system-header-check.c'
+        source.write_text('#include <simde/x86/gfni.h>\nint main(void) { return external_intrinsic(); }\n')
+        environment = simde_environment(destination)
+        self.assertNotIn('CPATH', environment)
+        output = self.out / 'system-header-check.json'
+        tool = Path(os.environ.get('ONION_EXTRACTOR', ROOT / 'build-libtooling/onion-extract'))
+        compiler = os.environ.get('ONION_CLANG', 'clang-18')
+        resource = run([compiler, '-print-resource-dir']).stdout.strip()
+        with patch.dict(os.environ, environment):
+            run([tool, '--compilation-id=system-header-check', '--output=' + str(output), source,
+                 '--', '-std=gnu11', '-resource-dir=' + resource])
+        raw = json.loads(output.read_text())
+        self.assertEqual([f['name'] for f in raw['functions']], ['main'])
+        self.assertIsNone(raw['functions'][0]['calls'][0]['target_id'])
 
 
 class RunnerFailureTests(unittest.TestCase):

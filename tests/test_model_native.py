@@ -11,6 +11,7 @@ from onion.execution import validate_structure
 from onion.integration import (connect, open_region, initial_plan, reconstruct_region,
     recommend_region, accumulate_regions)
 from onion.libtooling import extract_manifest, build_model
+from onion.viewer import export_viewer
 from test_model_integration import sites, trace
 from test_queues import run, ROOT
 
@@ -73,6 +74,11 @@ class ModelNativeTests(unittest.TestCase):
         self.assertTrue(selected['constraints'])
         self.assertEqual(selected['function_id'], region['function_id'])
         self.assertEqual({e['source'] for e in region['model']['edges']} - {n['id'] for n in region['model']['nodes']}, set())
+        view = export_viewer([w], self.out / 'reconstructed-structure.html')['execution_views'][0]
+        self.assertIn(queue['id'], {r['id'] for r in view['references']})
+        self.assertLessEqual({n['id'] for n in selected['model']['nodes']},
+                             {n['id'] for n in view['cfgs'][selected['function_id']]['nodes']})
+        self.assertFalse(view['runtime_evidence'])
 
     def test_child_interval_build_isolation_and_serialization(self):
         ref = self.ref('callee')
