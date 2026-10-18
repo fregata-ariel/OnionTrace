@@ -1,0 +1,169 @@
+{
+  "schema_version": 1,
+  "kind": "oai_callback_source_expectations",
+  "revision": "7fa4d018d4178f9664ea1ca377eca2e822c7a979",
+  "scope": "audited source expectations; not full OAI extraction or runtime evidence",
+  "sources": [
+    {
+      "path": "common/utils/actor/actor.c",
+      "sha256": "sha256:ed68c487116f2b3f55277a12ceb2febb0b97f60fd18b3585a02175a2beb302cd",
+      "url": "https://github.com/duranta-project/openairinterface5g/blob/7fa4d018d4178f9664ea1ca377eca2e822c7a979/common/utils/actor/actor.c"
+    },
+    {
+      "path": "common/utils/threadPool/notified_fifo.h",
+      "sha256": "sha256:9865344ade166bd78190c63f6199020bff530a3db75f327d3939df46878b27e3",
+      "url": "https://github.com/duranta-project/openairinterface5g/blob/7fa4d018d4178f9664ea1ca377eca2e822c7a979/common/utils/threadPool/notified_fifo.h"
+    },
+    {
+      "path": "common/utils/threadPool/task.h",
+      "sha256": "sha256:d51462698ba68a34917131430f5e802f289801a8ce30250fabbed1c66fd2d12a",
+      "url": "https://github.com/duranta-project/openairinterface5g/blob/7fa4d018d4178f9664ea1ca377eca2e822c7a979/common/utils/threadPool/task.h"
+    },
+    {
+      "path": "common/utils/threadPool/thread-pool.c",
+      "sha256": "sha256:67c998b1ef87d781cf4ac86dbaba3f7d57f470212bd3f3821c62d4da3e34ed5d",
+      "url": "https://github.com/duranta-project/openairinterface5g/blob/7fa4d018d4178f9664ea1ca377eca2e822c7a979/common/utils/threadPool/thread-pool.c"
+    },
+    {
+      "path": "executables/nr-ue.c",
+      "sha256": "sha256:1a8d4d3193fb0b40b764b92373ddf6a9680d2fc2004d49ae30d06e6bfb44b373",
+      "url": "https://github.com/duranta-project/openairinterface5g/blob/7fa4d018d4178f9664ea1ca377eca2e822c7a979/executables/nr-ue.c"
+    },
+    {
+      "path": "openair1/PHY/CODING/nrLDPC_coding/nrLDPC_coding_segment/nrLDPC_coding_segment_decoder.c",
+      "sha256": "sha256:5d3e0f81a9cc1293526c09b8e9f89be227e9253338c1c4a1fd466f2be637c210",
+      "url": "https://github.com/duranta-project/openairinterface5g/blob/7fa4d018d4178f9664ea1ca377eca2e822c7a979/openair1/PHY/CODING/nrLDPC_coding/nrLDPC_coding_segment/nrLDPC_coding_segment_decoder.c"
+    },
+    {
+      "path": "openair1/PHY/CODING/nrLDPC_coding/nrLDPC_coding_segment/nrLDPC_coding_segment_encoder.c",
+      "sha256": "sha256:8966096edc863e63e6ed7fe87aeb6551a91d91969e242c65c01e866ddab457dc",
+      "url": "https://github.com/duranta-project/openairinterface5g/blob/7fa4d018d4178f9664ea1ca377eca2e822c7a979/openair1/PHY/CODING/nrLDPC_coding/nrLDPC_coding_segment/nrLDPC_coding_segment_encoder.c"
+    }
+  ],
+  "sites": [
+    {
+      "key": "actor_invoke",
+      "path": "common/utils/actor/actor.c",
+      "function": "actor_thread",
+      "start_offset": 1932,
+      "end_offset": 1974,
+      "line": 54,
+      "text": "elt->processingFunc(NotifiedFifoData(elt))",
+      "thread_start": "actor_thread"
+    },
+    {
+      "key": "actor_null_registration",
+      "path": "common/utils/actor/actor.c",
+      "function": "flush_actor",
+      "start_offset": 2952,
+      "end_offset": 2999,
+      "line": 94,
+      "text": "newNotifiedFIFO_elt(0, 0, &response_fifo, NULL)",
+      "nullable": true
+    },
+    {
+      "key": "actor_registration",
+      "path": "executables/nr-ue.c",
+      "function": "UE_thread",
+      "start_offset": 42982,
+      "end_offset": 43080,
+      "line": 1021,
+      "text": "newNotifiedFIFO_elt(sizeof(nr_rxtx_thread_data_t), curMsg.proc.nr_slot_tx, NULL, UE_dl_processing)",
+      "callback_symbol": "UE_dl_processing"
+    },
+    {
+      "key": "actor_submission",
+      "path": "executables/nr-ue.c",
+      "function": "UE_thread",
+      "start_offset": 43463,
+      "end_offset": 43566,
+      "line": 1028,
+      "text": "pushNotifiedFIFO(&UE->dl_actors[curMsg.proc.nr_slot_rx % get_nrUE_params()->num_dl_actors].fifo, newRx)"
+    },
+    {
+      "key": "actor_inline",
+      "path": "executables/nr-ue.c",
+      "function": "UE_thread",
+      "start_offset": 43587,
+      "end_offset": 43618,
+      "line": 1030,
+      "text": "newRx->processingFunc(curMsgRx)"
+    },
+    {
+      "key": "actor_tx_registration",
+      "path": "executables/nr-ue.c",
+      "function": "UE_thread",
+      "start_offset": 44218,
+      "end_offset": 44289,
+      "line": 1046,
+      "text": "newNotifiedFIFO_elt(sizeof(nr_rxtx_thread_data_t), 0, 0, processSlotTX)",
+      "callback_symbol": "processSlotTX"
+    },
+    {
+      "key": "actor_tx_inline",
+      "path": "executables/nr-ue.c",
+      "function": "start_process_slot_tx",
+      "start_offset": 6451,
+      "end_offset": 6482,
+      "line": 110,
+      "text": "newTx->processingFunc(curMsgTx)"
+    },
+    {
+      "key": "pool_inline",
+      "path": "common/utils/threadPool/thread-pool.c",
+      "function": "pushTpool",
+      "start_offset": 1409,
+      "end_offset": 1429,
+      "line": 40,
+      "text": "task.func(task.args)"
+    },
+    {
+      "key": "pool_invoke",
+      "path": "common/utils/threadPool/thread-pool.c",
+      "function": "worker_thread",
+      "start_offset": 3555,
+      "end_offset": 3577,
+      "line": 131,
+      "text": "ret.t.func(ret.t.args)",
+      "thread_start": "worker_thread"
+    },
+    {
+      "key": "pool_steal",
+      "path": "common/utils/threadPool/thread-pool.c",
+      "function": "worker_thread",
+      "start_offset": 3085,
+      "end_offset": 3115,
+      "line": 114,
+      "text": "try_pop_not_q(&q_arr[i % len])"
+    },
+    {
+      "key": "pool_acquire",
+      "path": "common/utils/threadPool/thread-pool.c",
+      "function": "worker_thread",
+      "start_offset": 3212,
+      "end_offset": 3240,
+      "line": 120,
+      "text": "pop_not_q(&q_arr[idx], &ret)"
+    },
+    {
+      "key": "pool_encoding",
+      "path": "openair1/PHY/CODING/nrLDPC_coding/nrLDPC_coding_segment/nrLDPC_coding_segment_encoder.c",
+      "function": "nrLDPC_launch_TB_encoding",
+      "start_offset": 16252,
+      "end_offset": 16309,
+      "line": 395,
+      "text": "pushTpool(nrLDPC_slot_encoding_parameters->threadPool, t)",
+      "callback_symbol": "ldpc8blocks"
+    },
+    {
+      "key": "pool_decoding",
+      "path": "openair1/PHY/CODING/nrLDPC_coding/nrLDPC_coding_segment/nrLDPC_coding_segment_decoder.c",
+      "function": "nrLDPC_prepare_TB_decoding",
+      "start_offset": 10903,
+      "end_offset": 10960,
+      "line": 273,
+      "text": "pushTpool(nrLDPC_slot_decoding_parameters->threadPool, t)",
+      "callback_symbol": "nr_process_decode_segment"
+    }
+  ]
+}

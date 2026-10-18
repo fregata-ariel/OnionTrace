@@ -137,7 +137,15 @@ def validate_extraction(raw):
     if len(functions) != len(raw['functions']):
         raise ValueError('duplicate function ID')
     calls = set()
+    writes = set()
     for function in functions.values():
+        for assignment in function.get('callback_writes', []):
+            if assignment['id'] in writes or not assignment['id'].startswith(function['id'] + '/write/'):
+                raise ValueError('duplicate callback write or wrong owner')
+            writes.add(assignment['id'])
+            if (not isinstance(assignment['target'], dict) or not isinstance(assignment['value'], dict)
+                    or not isinstance(assignment['conditions'], list) or not assignment['range']):
+                raise ValueError('invalid callback write evidence')
         nodes = {n['id']: n for n in function['blocks']}
         if len(nodes) != len(function['blocks']):
             raise ValueError('duplicate block ID')

@@ -84,36 +84,109 @@ public:
     return V;
   }
   // Deliberately small value domain: parameters and function designators can be
-  // substituted across a direct call. Variables, casts and computed pointers
-  // stay opaque; collecting candidate designators does not resolve them.
-  j::Object value(const Expr *Input, const FunctionDecl *Owner) {
+  // substituted across a direct call. T5 retains storage/record/call shapes as
+  // evidence, without resolving aliases, casts or computed pointer returns.
+  j::Object value(const Expr *Input, const FunctionDecl *Owner, unsigned Depth = 0) {
     const Expr *A = Input->IgnoreParenImpCasts();
     if (const auto *U = dyn_cast<UnaryOperator>(A))
       if (U->getOpcode() == UO_AddrOf) A = U->getSubExpr()->IgnoreParenImpCasts();
     j::Object V = statement(Input->IgnoreParenImpCasts());
     V["value_kind"] = "opaque";
+    if (Depth > 16) return V;
+    if (Input->isNullPointerConstant(Ctx, Expr::NPC_ValueDependentIsNotNull)) {
+      V["value_kind"] = "null";
+      return V;
+    }
     if (const auto *R = dyn_cast<DeclRefExpr>(A)) {
       if (const auto *F = dyn_cast<FunctionDecl>(R->getDecl())) {
         V["value_kind"] = "function";
         V["function_usr"] = usr(F);
         V["function_linkage"] = linkage(F);
         V["function_type"] = F->getType().getCanonicalType().getAsString(Policy);
-      } else if (const auto *P = dyn_cast<ParmVarDecl>(R->getDecl()); P && !MutableParameters.count(P)) {
+      } else if (const auto *P = dyn_cast<ParmVarDecl>(R->getDecl())) {
         for (unsigned I = 0; I < Owner->getNumParams(); ++I) if (Owner->getParamDecl(I) == P) {
-          V["value_kind"] = "parameter";
+          V["value_kind"] = MutableParameters.count(P) ? "variable" : "parameter";
           V["parameter_index"] = I;
+          V["variable_usr"] = usr(P);
         }
+      } else if (isa<VarDecl>(R->getDecl())) {
+        V["value_kind"] = "variable";
+        V["variable_usr"] = usr(R->getDecl());
       }
+    }
+    if (const auto *M = dyn_cast<MemberExpr>(A)) {
+      V["value_kind"] = "member";
+      V["field_name"] = M->getMemberDecl()->getNameAsString();
+      V["field_usr"] = usr(M->getMemberDecl());
+      V["base"] = value(M->getBase(), Owner, Depth + 1);
+      V["callback_protocol"] = callbackField(M->getMemberDecl());
+    }
+    if (const auto *L = dyn_cast<InitListExpr>(A)) {
+      if (const auto *RT = L->getType()->getAs<RecordType>()) {
+        if (RT->getDecl()->isUnion()) return V;
+        V["value_kind"] = "record";
+        j::Array Fields;
+        unsigned I = 0;
+        for (const auto *F : RT->getDecl()->fields()) {
+          if (I >= L->getNumInits()) break;
+          Fields.push_back(j::Object{{"name", F->getNameAsString()}, {"usr", usr(F)},
+            {"callback_protocol", callbackField(F)}, {"value", value(L->getInit(I++), Owner, Depth + 1)}});
+        }
+        V["fields"] = std::move(Fields);
+      }
+    }
+    if (const auto *L = dyn_cast<CompoundLiteralExpr>(A))
+      return value(L->getInitializer(), Owner, Depth + 1);
+    if (const auto *C = dyn_cast<CallExpr>(A)) {
+      V["value_kind"] = "call_result";
+      V["callback_api"] = callbackApi(C->getDirectCallee());
+      j::Array Arguments;
+      for (const Expr *Arg : C->arguments()) Arguments.push_back(value(Arg, Owner, Depth + 1));
+      V["arguments"] = std::move(Arguments);
     }
     if (const auto *C = dyn_cast<ConditionalOperator>(A)) {
       j::Array Candidates;
-      Candidates.push_back(value(C->getTrueExpr(), Owner));
-      Candidates.push_back(value(C->getFalseExpr(), Owner));
+      Candidates.push_back(value(C->getTrueExpr(), Owner, Depth + 1));
+      Candidates.push_back(value(C->getFalseExpr(), Owner, Depth + 1));
       V["candidates"] = std::move(Candidates);
     }
     return V;
   }
-  j::Array guards(const CallExpr *Call) {
+  bool callbackType(QualType T) {
+    T = T.getCanonicalType();
+    if (!T->isPointerType()) return false;
+    const auto *P = T->getPointeeType()->getAs<FunctionProtoType>();
+    return P && P->getReturnType()->isVoidType() && P->getNumParams() == 1 &&
+      P->getParamType(0)->isPointerType() && P->getParamType(0)->getPointeeType()->isVoidType();
+  }
+  j::Value callbackField(const ValueDecl *F) {
+    if (!isa<FieldDecl>(F) || !callbackType(F->getType())) return nullptr;
+    if (F->getName() == "processingFunc") return "actor";
+    if (F->getName() == "func") return "pool";
+    return nullptr;
+  }
+  bool hasField(QualType T, llvm::StringRef Name) {
+    if (T->isPointerType()) T = T->getPointeeType();
+    const auto *R = T->getAs<RecordType>();
+    if (!R) return false;
+    for (const auto *F : R->getDecl()->fields())
+      if (F->getName() == Name && callbackType(F->getType())) return true;
+    return false;
+  }
+  j::Value callbackApi(const FunctionDecl *F) {
+    if (!F || isa<CXXMethodDecl>(F)) return nullptr;
+    auto Name = F->getNameAsString();
+    if (Name == "newNotifiedFIFO_elt" && F->getNumParams() == 4 &&
+        hasField(F->getReturnType(), "processingFunc") && callbackType(F->getParamDecl(3)->getType()))
+      return "actor_register";
+    if ((Name == "pushTpool" || Name == "pushTpool_mask") &&
+        F->getNumParams() == (Name == "pushTpool" ? 2u : 3u) &&
+        hasField(F->getParamDecl(1)->getType(), "func")) return "pool_submit";
+    if (Name == "pushNotifiedFIFO" && F->getNumParams() == 2 &&
+        hasField(F->getParamDecl(1)->getType(), "processingFunc")) return "actor_submit";
+    return nullptr;
+  }
+  j::Array guards(const Stmt *Call) {
     j::Array Result;
     DynTypedNode Node = DynTypedNode::create(*Call);
     // Lexical guards are source evidence only, never a feasibility proof.
@@ -182,8 +255,15 @@ public:
     class Writes : public RecursiveASTVisitor<Writes> {
       std::set<const ParmVarDecl *> &Modified;
       void mark(const Expr *E) {
-        if (const auto *R = dyn_cast<DeclRefExpr>(E->IgnoreParenImpCasts()))
+        E = E->IgnoreParenImpCasts();
+        if (const auto *R = dyn_cast<DeclRefExpr>(E))
           if (const auto *P = dyn_cast<ParmVarDecl>(R->getDecl())) Modified.insert(P);
+        // Mutating/escaping a subobject invalidates whole-parameter forwarding
+        // too. This is deliberately conservative for pointer/array bases.
+        if (const auto *M = dyn_cast<MemberExpr>(E)) mark(M->getBase());
+        if (const auto *A = dyn_cast<ArraySubscriptExpr>(E)) mark(A->getBase());
+        if (const auto *U = dyn_cast<UnaryOperator>(E))
+          if (U->getOpcode() == UO_Deref) mark(U->getSubExpr());
       }
     public:
       explicit Writes(std::set<const ParmVarDecl *> &M) : Modified(M) {}
@@ -198,7 +278,7 @@ public:
     } Writer(MutableParameters);
     Writer.TraverseStmt(D->getBody());
     std::string ID = fid(D);
-    j::Array Blocks, Edges, Calls, Problems;
+    j::Array Blocks, Edges, Calls, Writes, Problems;
     if (Ctx.getLangOpts().CPlusPlus)
       Problems.push_back(j::Object{{"kind", "cxx_semantics_not_complete"},
                                   {"affects_completeness", true}});
@@ -252,10 +332,39 @@ public:
       const FunctionDecl *Function;
       std::string Owner;
       std::map<const Stmt *, std::string> &Placement;
-      j::Array &Calls, &Problems;
+      j::Array &Calls, &Writes, &Problems;
     public:
-      BodyVisitor(Extractor &E, const FunctionDecl *F, std::string O, std::map<const Stmt *, std::string> &P, j::Array &C, j::Array &U)
-          : E(E), Function(F), Owner(O), Placement(P), Calls(C), Problems(U) {}
+      BodyVisitor(Extractor &E, const FunctionDecl *F, std::string O, std::map<const Stmt *, std::string> &P, j::Array &C, j::Array &W, j::Array &U)
+          : E(E), Function(F), Owner(O), Placement(P), Calls(C), Writes(W), Problems(U) {}
+      void write(j::Object Target, const Expr *Value, const Stmt *Site, SourceRange Range, bool Escape = false) {
+        auto Written = E.value(Value, Function);
+        if (Escape) {
+          Written["value_kind"] = "opaque";
+          Written["reason"] = "address escape; storage may be modified";
+        }
+        Writes.push_back(j::Object{{"id", Owner + "/write/" + std::to_string(Writes.size())},
+          {"target", std::move(Target)}, {"value", std::move(Written)},
+          {"effect", Escape ? "address_escape" : "write"},
+          {"range", E.range(Range)}, {"conditions", E.guards(Site)}});
+      }
+      bool VisitVarDecl(VarDecl *V) {
+        if (V->hasInit()) write(j::Object{{"value_kind", "variable"}, {"variable_usr", E.usr(V)}},
+                               V->getInit(), V->getInit(), V->getSourceRange());
+        return true;
+      }
+      bool VisitBinaryOperator(BinaryOperator *B) {
+        if (B->isAssignmentOp()) write(E.value(B->getLHS(), Function), B->getRHS(), B, B->getSourceRange());
+        return true;
+      }
+      bool VisitUnaryOperator(UnaryOperator *U) {
+        if (U->getOpcode() == UO_AddrOf) {
+          auto Target = E.value(U->getSubExpr(), Function);
+          auto Kind = Target.getString("value_kind");
+          if (Kind == "variable" || Kind == "parameter" || Kind == "member")
+            write(std::move(Target), U, U, U->getSourceRange(), true);
+        }
+        return true;
+      }
       bool TraverseLambdaExpr(LambdaExpr *L) {
         Problems.push_back(j::Object{{"kind", "unsupported_lambda"}, {"range", E.range(L->getSourceRange())},
                                     {"affects_completeness", true}});
@@ -282,6 +391,8 @@ public:
           {"kind", Callee ? "direct" : "indirect"}, {"range", E.range(C->getSourceRange())},
           {"type", C->getType().getAsString(E.Policy)}, {"callee_type", C->getCallee()->getType().getAsString(E.Policy)},
           {"callee_expression", E.pretty(C->getCallee())}, {"arguments", std::move(Arguments)},
+          {"callee_value", E.value(C->getCallee(), Function)},
+          {"callback_api", E.callbackApi(Callee)},
           {"conditions", E.guards(C)},
           {"thread_api", E.threadApi(Callee)},
           {"callee_canonical_type", Callee ? j::Value(Callee->getType().getCanonicalType().getAsString(E.Policy)) : j::Value(nullptr)},
@@ -295,12 +406,13 @@ public:
           {"reason", Local ? j::Value(nullptr) : j::Value(Callee ? "definition not emitted in this TU; cross-TU resolution required" : "indirect call; points-to analysis not performed")}});
         return true;
       }
-    } Visitor(*this, D, ID, Placement, Calls, Problems);
+    } Visitor(*this, D, ID, Placement, Calls, Writes, Problems);
     Visitor.TraverseStmt(D->getBody());
     Functions.push_back(j::Object{{"id", ID}, {"usr", usr(D)}, {"name", D->getNameAsString()},
                                   {"qualified_name", D->getQualifiedNameAsString()}, {"type", D->getType().getAsString(Policy)},
                                   {"canonical_type", D->getType().getCanonicalType().getAsString(Policy)},
                                   {"parameter_count", D->getNumParams()},
+                                  {"callback_writes", std::move(Writes)},
                                   {"linkage", linkage(D)}, {"range", range(D->getSourceRange())},
                                   {"blocks", std::move(Blocks)}, {"edges", std::move(Edges)},
                                   {"calls", std::move(Calls)}, {"uncertainties", std::move(Problems)}});
