@@ -114,11 +114,19 @@ def diagnostic(out, tool, jobs):
                 raise ValueError('capture failed')
             return manifest
         manifest = stage('capture', capture)
-        extraction = stage('extract', lambda: extract_manifest(manifest, tool, out / 'extraction'))
-        if not extraction['ready']:
-            raise ValueError('extraction failed')
-        acceptance = stage('acceptance', lambda: export_acceptance(manifest, extraction, out / 'acceptance', oai=True))
-        result['passed'] = acceptance['passed']
+        def extract():
+            value = extract_manifest(manifest, tool, out / 'extraction')
+            if not value['ready']:
+                raise ValueError('extraction failed')
+            return value
+        extraction = stage('extract', extract)
+        def accept():
+            value = export_acceptance(manifest, extraction, out / 'acceptance', oai=True)
+            if not value['passed']:
+                raise ValueError('acceptance failed')
+            return value
+        stage('acceptance', accept)
+        result['passed'] = True
     except Exception as error:
         result['failure'] = str(error)
         print(traceback.format_exc(), flush=True)
