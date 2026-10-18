@@ -40,7 +40,9 @@ LibToolingはT5の値領域を変えず、各関数に`queue_semantics_version: 
 
 同名フィールドでもUSRが違えば一致させない。`&first.fifo`と`&second.fifo`は基底宣言が異なるので結ばない。未変更引数は実引数を展開し、threadCreateの引数にも同じ根拠を保持する。基底が未解決のポインタでは、同じフィールドUSRを持つ**論理的な系列**を候補にできるが、同じオブジェクトとは断定しない。`info->gNB->fifo`等のポインタフィールドをまたぐと新しい基底個体は未解決になり、元の格納場所を`via`に保持する。完全に不明な戻り値／別名は候補なし・理由付きで残す。
 
-ポインタやポインタフィールドのwriteはflow-insensitiveな代替候補であり、最終代入の証明を行わない。既知の書換え先と元値を残し、未知の上書き・escapeも残す。`&p`をpの指すQueueへ縮約しない。明示cast、未知添字、展開上限も不確実性として残す。到達不能／意味不完全な呼出しはblockedとし、応答先を介する間接の接続にも利用しない。完全なheap／points-to、関数戻り値・payload内ポインタの全域追跡は対象外。
+ポインタやポインタフィールドのwriteはflow-insensitiveな代替候補であり、最終代入の証明を行わない。既知の書換え先と元値を残し、未知の上書き・escapeも残す。投入前の要素の応答先writeは`response_writes`として要素と一緒に直接呼出しへ引き継ぎ、投入操作の`element_response_writes`にも列挙する。返却候補には生成時・producer側・consumer側の応答先を残し、producerのwrite由来で結んだrelationは`response_write_evidence`にwrite ID・関数・位置・条件を持つ。
+
+writeの格納先キーは配列基底と定数添字を含む。動的添字や計算された基底のidentityが不明なら、同じ格納先のwriteとして一致させない（未解決field familyのmay-linkとは区別）。`&p`をpの指すQueueへ縮約しない。明示cast、未知添字、展開上限も不確実性として残す。到達不能／意味不完全な呼出しはblockedとし、応答先を介する間接の接続にも利用しない。完全なheap／points-to、関数戻り値・payload内ポインタの全域追跡は対象外。
 
 ## 所有権と将来の計測候補
 

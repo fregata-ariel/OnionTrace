@@ -52,6 +52,8 @@ void override_response(void) {
   }
 }
 int main(void) {
+  extern void queue_review_cases(void);
+  queue_review_cases();
   unsigned long a, b, c;
   initNotifiedFIFO(&first.fifo); initNotifiedFIFO(&second.fifo);
   initNotifiedFIFO(&first.reply); initNotifiedFIFO(&second.reply);

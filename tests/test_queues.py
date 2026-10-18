@@ -9,7 +9,7 @@ import unittest
 
 from onion.build_inputs import collect, query, file_record
 from onion.libtooling import extract_manifest
-from onion.queues import build_queues, _references, _compatible, _expand, CONTRACTS
+from onion.queues import build_queues, _references, _compatible, _expand, _key, CONTRACTS
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -127,6 +127,46 @@ class QueueNativeTests(unittest.TestCase):
         self.assertEqual({r['operation'] for r in targets}, {'dequeue', 'poll'})
         self.assertEqual(len(targets), 2)
 
+    def test_producer_response_override_reaches_consumer_with_write_evidence(self):
+        direct = self.ops('enqueue', 'producer_override')[0]
+        forwarded = self.ops('enqueue', 'forward_element')[0]
+        for submission in (direct, forwarded):
+            writes = submission['element_response_writes']
+            self.assertEqual(len(writes), 1)
+            self.assertTrue(writes[0]['conditions'])
+            self.assertEqual(self.names[writes[0]['source']], 'producer_override')
+            self.assertTrue(writes[0]['range'])
+            self.assertTrue(writes[0]['unknown'])
+            self.assertEqual({r['base']['usr'] for r in writes[0]['queue_candidates']}, {'c:@producer_reply_B'})
+            acquired = next(o for o in self.ops('dequeue', 'producer_response')
+                            if _compatible(submission['queue_candidates'][0], o['queue_candidates'][0]))
+            response_id = next(r['target'] for r in self.graph['relations']
+                               if r['kind'] == 'response_destination' and r['source'] == acquired['id'])
+            returns = [r for r in self.graph['relations'] if r['kind'] == 'response_transfer' and r['source'] == response_id]
+            self.assertEqual({self.operations[r['target']]['queue_candidates'][0]['base']['usr'] for r in returns},
+                             {'c:@producer_reply_A', 'c:@producer_reply_B'})
+            changed = next(r for r in returns if self.operations[r['target']]['queue_candidates'][0]['base']['usr'] == 'c:@producer_reply_B')
+            self.assertEqual(changed['resolution'], 'candidate')
+            self.assertEqual(changed['response_write_evidence'][0]['id'], writes[0]['id'])
+            self.assertEqual(changed['response_write_evidence'][0]['conditions'], writes[0]['conditions'])
+            self.assertIn(writes[0]['range'], changed['evidence'])
+
+    def test_array_pointer_field_writes_keep_array_and_constant_index_identity(self):
+        submissions = self.ops('enqueue', 'array_pointer_writes')
+        known = next(o for o in submissions if o['queue'].get('write_evidence'))
+        writes = known['queue']['write_evidence']
+        self.assertEqual(len(writes), 1)
+        concrete = [r for r in known['queue_candidates'] if r['concrete']]
+        self.assertEqual({r['base']['usr'] for r in concrete}, {'c:@array_reply_A'})
+        targets = [self.operations[r['target']] for r in self.graph['relations']
+                   if r['kind'] == 'transfers' and r['source'] == known['id']]
+        self.assertEqual({o['queue_candidates'][0]['base']['usr'] for o in targets}, {'c:@array_reply_A'})
+        unknown = [o for o in submissions if o is not known]
+        self.assertEqual(len(unknown), 2)
+        for row in unknown:
+            self.assertNotIn('write_evidence', row['queue'])
+            self.assertFalse(any(r['concrete'] for r in row['queue_candidates']))
+
     def test_gnb_null_callback_direct_processing_and_new_completion(self):
         registrations = {r['id']: r for r in self.graph['callback_registrations']}
         for op in self.ops('create', 'rx_func'):
@@ -221,6 +261,41 @@ class QueueNativeTests(unittest.TestCase):
 
 
 class QueueValueTests(unittest.TestCase):
+    def test_element_carries_producer_response_write_through_parameter_forwarding(self):
+        element = {'shape': 'storage', 'scope': 'tu', 'usr': 'element', 'pointer': True}
+        reply = {'shape': 'address', 'base': {'shape': 'storage', 'scope': 'tu', 'usr': 'reply_B', 'pointer': False}}
+        target = {'shape': 'member', 'base': element, 'field_usr': 'elt.reponseFifo',
+                  'field_name': 'reponseFifo', 'arrow': True, 'pointer': True}
+        guard = [{'branch': 'then', 'condition': {'text': 'change'}}]
+        function = {'id': 'producer', 'callback_writes': [
+            {'id': 'init', 'queue_target': element, 'queue_value': {'shape': 'call', 'arguments': []},
+             'range': {}, 'conditions': [], 'effect': 'write'},
+            {'id': 'response', 'queue_target': target, 'queue_value': reply,
+             'range': {'test': 'write'}, 'conditions': guard, 'effect': 'write'}]}
+        expanded = _expand(element, function)
+        writes = expanded['response_writes']
+        self.assertEqual([w['id'] for w in writes], ['response'])
+        self.assertEqual(writes[0]['conditions'], guard)
+        self.assertEqual(writes[0]['queue_candidates'][0]['base']['usr'], 'reply_B')
+        parameter = {'shape': 'storage', 'scope': 'tu', 'usr': 'arg', 'pointer': True, 'parameter_index': 0}
+        forwarded = _expand(parameter, {'id': 'forward', 'callback_writes': []}, [expanded])
+        self.assertEqual(forwarded['response_writes'], writes)
+
+    def test_write_keys_keep_array_base_and_index_and_reject_unknown_bases(self):
+        def member(name, index):
+            return {'shape': 'member', 'field_usr': 'reply', 'field_name': 'reply', 'arrow': False, 'pointer': True,
+                    'base': {'shape': 'index', 'base': {'shape': 'storage', 'scope': 'tu', 'usr': name}, 'index': index}}
+        zero, one = {'shape': 'integer', 'literal': '0'}, {'shape': 'integer', 'literal': '1'}
+        self.assertNotEqual(_key(member('a', zero)), _key(member('a', one)))
+        self.assertNotEqual(_key(member('a', zero)), _key(member('b', zero)))
+        dynamic = member('a', {'shape': 'opaque'})
+        self.assertIsNone(_key(dynamic))
+        computed = {**dynamic, 'base': {'shape': 'call'}}
+        self.assertIsNone(_key(computed))
+        f = {'id': 'f', 'callback_writes': [{'id': 'wrong', 'queue_target': dynamic, 'queue_value': {'shape': 'null'},
+                                           'range': {}, 'conditions': [], 'effect': 'write'}]}
+        self.assertNotIn('write_evidence', _expand(computed, f))
+
     def test_unknown_bases_match_field_usr_but_names_alone_never_match(self):
         def member(usr, base):
             return {'shape': 'member', 'field_usr': usr, 'field_name': 'fifo', 'arrow': True,

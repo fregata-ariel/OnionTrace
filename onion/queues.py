@@ -40,16 +40,45 @@ CONTRACTS = {
 
 
 def _key(v):
+    """Exact syntactic storage identity, never equality of unknown bases."""
     if v.get('shape') == 'storage':
         return ('storage', v['scope'], v['usr'])
+    base = _key(v['base']) if 'base' in v else None
+    if base is None:
+        return None
     if v.get('shape') == 'member':
-        return ('member', _key(v['base']), v['field_usr'], v['arrow'])
+        return ('member', base, v['field_usr'], v['arrow'])
     if v.get('shape') in ('address', 'deref'):
-        return (v['shape'], _key(v['base']))
+        return (v['shape'], base)
+    if v.get('shape') == 'index' and v['index'].get('shape') == 'integer':
+        return ('index', base, v['index']['literal'])
     return None
 
 
 def _expand(value, function, bindings=(), seen=(), depth=0):
+    expanded = _expand_value(value, function, bindings, seen, depth)
+    key = _key(value)
+    if key is None or key in seen or depth > 32:
+        return expanded
+    # Member effects do not overwrite the element pointer itself. Carry them
+    # with that element so direct-call forwarding and aliases retain producer
+    # response-field writes all the way to submission and the return may-join.
+    for w in function['callback_writes']:
+        target = w.get('queue_target', {})
+        if (target.get('shape') != 'member' or target.get('field_name') != 'reponseFifo' or
+                _key(target['base']) != key):
+            continue
+        written = _expand(w['queue_value'], function, bindings, (*seen, key), depth + 1)
+        record = {'id': w['id'], 'source': function['id'], 'range': w['range'],
+                  'conditions': copy.deepcopy(w['conditions']), 'effect': w['effect'],
+                  'value': written, 'queue_candidates': _references(written), 'unknown': True,
+                  'reason': 'element response-field write; flow-insensitive candidate, final value/aliases unproven'}
+        if record not in expanded.setdefault('response_writes', []):
+            expanded['response_writes'].append(record)
+    return expanded
+
+
+def _expand_value(value, function, bindings=(), seen=(), depth=0):
     """Flow-insensitive alternatives, retaining unknown writes and escapes.
 
     Addressed concrete storage is a source location, not a pointer value to
@@ -83,7 +112,7 @@ def _expand(value, function, bindings=(), seen=(), depth=0):
                                         'effect': w['effect']} for w in effects]}
     # Explicit pointer-field writes are alternatives too. In particular,
     # reponseFifo may be changed after construction or acquisition.
-    if v.get('shape') == 'member' and v.get('pointer') and key not in seen:
+    if v.get('shape') == 'member' and v.get('pointer') and key is not None and key not in seen:
         effects = [w for w in function['callback_writes'] if _key(w.get('queue_target', {})) == key]
         if effects:
             original = {**v, 'base': _expand(v['base'], function, bindings, (*seen, key), depth + 1)}
@@ -187,6 +216,20 @@ def _members(v):
     return []
 
 
+def _response_writes(value):
+    """Only alternatives/casts of this element, not unrelated call arguments."""
+    rows = list(value.get('response_writes', []))
+    if value.get('shape') == 'alternatives':
+        rows += [w for c in value['choices'] for w in _response_writes(c)]
+    if value.get('shape') == 'cast':
+        rows += _response_writes(value['base'])
+    unique = []
+    for row in rows:
+        if row not in unique:
+            unique.append(row)
+    return unique
+
+
 def _site(v):
     begin = v['range']['expansion']['begin']
     return v.get('origin_function'), begin['path'], begin['offset']
@@ -275,6 +318,7 @@ def build_queues(manifest, extraction, targets=None, *, max_contexts=10000, max_
                     refs = _references(queue)
                     graph['operations'].append({**common, 'operation': api, 'queue': queue, 'queue_candidates': refs,
                                                 'arguments': args, 'semantics': CONTRACTS[api],
+                                                'element_response_writes': _response_writes(args[1]) if api == 'enqueue' else [],
                                                 'resolution': 'candidate' if refs and not blocked else 'unresolved',
                                                 'reason': 'unreachable CFG placement or incomplete function semantics' if blocked else
                                                           'logical source locations; runtime instance and aliases unproven' if refs else
@@ -314,11 +358,15 @@ def _connect(graph):
         return [r for v in _origins(value) for r in by_site.get(_site(v), [])
                 if r['operation'] in operation and not r['blocked'] and same_context(r)]
 
-    def link(kind, source, target, reason):
+    def link(kind, source, target, reason, response_writes=()):
         if source['blocked'] or target['blocked']:
             return
         record = {'kind': kind, 'source': source['id'], 'target': target['id'], 'resolution': 'candidate',
                   'reason': reason, 'evidence': [source['range'], target['range']]}
+        if response_writes:
+            record['response_write_evidence'] = [{k: w[k] for k in ('id', 'source', 'range', 'conditions', 'effect')}
+                                                 for w in response_writes]
+            record['evidence'] += [w['range'] for w in response_writes]
         if record not in graph['relations']:
             graph['relations'].append(record)
 
@@ -353,9 +401,12 @@ def _connect(graph):
                 for creation in origins(submission['arguments'][1], {'create'}, submission):
                     link('returns_to', creation, response, 'constructor response queue is a candidate; field writes/aliasing and non-NULL guard retained')
                     for destination in consumers:
+                        writes = [w for w in submission['element_response_writes']
+                                  if _matches(w['queue_candidates'], destination['queue_candidates'])]
                         if (_matches(creation['queue_candidates'], destination['queue_candidates']) or
-                                _matches(response['queue_candidates'], destination['queue_candidates'])):
-                            link('response_transfer', response, destination, 'candidate response queue from submitted allocation; no element identity or execution proof')
+                                _matches(response['queue_candidates'], destination['queue_candidates']) or writes):
+                            link('response_transfer', response, destination,
+                                 'candidate response queue from allocation or producer/consumer field writes; no element identity or execution proof', writes)
     for invoke in graph['processing_calls']:
         callee = invoke['callee']
         for member in _members(callee):
