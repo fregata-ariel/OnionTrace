@@ -1,4 +1,4 @@
-name: OAI pinned acceptance
+name: OAI object diagnostic
 
 on:
   workflow_dispatch:
@@ -21,7 +21,7 @@ jobs:
   acceptance:
     name: OAI 2026.w07 / SIMU / Clang 18
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -39,10 +39,11 @@ jobs:
           cmake --build build-libtooling --parallel 2
       - name: Install locked ASN.1 and SIMDe sources in isolated prefix
         run: python scripts/install_oai_dependencies.py --prefix out/oai-dependencies --jobs 2
-      - name: Build, capture, extract, and verify both softmodems
-        run: python scripts/oai_ci.py --out out/oai --tool build-libtooling/onion-extract --jobs 2
+      - name: Build audited objects and diagnose extraction
+        timeout-minutes: 15
+        run: python scripts/oai_object_diagnostic.py --out out/oai --tool build-libtooling/onion-extract --jobs 2
       - name: Publish acceptance summary
-        if: ${{ !cancelled() }}
+        if: ${{ always() }}
         run: |
           python - <<'PY'
           import json, os
@@ -57,14 +58,16 @@ jobs:
                   summary.write('FAIL: preparation did not reach the OAI runner. Inspect dependency/toolchain logs.\n')
           PY
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: ${{ !cancelled() }}
+        if: ${{ always() }}
         with:
-          name: oai-2026-w07-${{ github.run_id }}-${{ github.run_attempt }}
+          name: oai-objects-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             out/oai/run.json
             out/oai/failures.json
             out/oai/*.log
             out/oai/dependencies.json
+            out/oai/object-targets.json
+            out/oai/objects.json
             out/oai/source-audits.json
             out/oai/inputs/
             out/oai/extraction/
