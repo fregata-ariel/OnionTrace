@@ -62,3 +62,9 @@ Its workspace, region and reconstruction documents retain scoped references, par
 plan snapshots and per-run provenance. Trace headers also carry the exact region scope and
 plan-content digest. See [docs/model-integration.md](docs/model-integration.md) for the API,
 observation boundaries and conservative treatment of unresolved asynchronous connections.
+
+## M1/T8 offline structure viewer
+
+`python -m onion.viewer` projects one or more T7 workspaces into a self-contained HTML.
+It preserves typed relations, source evidence, unresolved endpoints and scoped CFG IDs.
+Static resolution creates no runtime evidence. See [docs/structure-viewer.md](docs/structure-viewer.md).

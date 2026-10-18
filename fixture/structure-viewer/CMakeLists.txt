@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.16)
+project(structure_viewer_fixture C)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+add_executable(nr-softmodem main.c ../queues/runtime.c)
+add_executable(nr-uesoftmodem main.c ../queues/runtime.c)
+target_compile_definitions(nr-uesoftmodem PRIVATE UE_VIEW=1)
+target_include_directories(nr-softmodem PRIVATE ../queues)
+target_include_directories(nr-uesoftmodem PRIVATE ../queues)

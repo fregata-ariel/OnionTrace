@@ -20,6 +20,7 @@ from onion.threads import build_threads
 from onion.callbacks import build_callbacks
 from onion.queues import build_queues
 from onion.integration import connect
+from onion.viewer import export_viewer
 
 
 class Tee:
@@ -123,6 +124,22 @@ def main():
     workspace = connect(integration_manifest, integration_extraction, 'integration_fixture')
     for name, value in [('manifest', integration_manifest), ('workspace', workspace), ('structure', workspace['structure'])]:
         (output / 'integration' / (name + '.json')).write_text(json.dumps(value, indent=2) + '\n')
+    viewer_build = output / 'structure-viewer/build'
+    query(viewer_build)
+    subprocess.run(['cmake', '-S', str(ROOT / 'fixture/structure-viewer'), '-B', str(viewer_build),
+                    '-G', 'Ninja', '-DCMAKE_C_COMPILER=' + options.cc], check=True)
+    subprocess.run(['cmake', '--build', str(viewer_build)], check=True)
+    viewer_manifest = collect(viewer_build, ['nr-softmodem', 'nr-uesoftmodem'])
+    viewer_extraction = extract_manifest(viewer_manifest, tool, output / 'structure-viewer/extraction')
+    if not viewer_manifest['ready'] or not viewer_extraction['ready']:
+        raise RuntimeError('Structure viewer fixture extraction failed')
+    viewer_workspaces = [connect(viewer_manifest, viewer_extraction, target)
+                         for target in ('nr-softmodem', 'nr-uesoftmodem')]
+    for target, value in zip(('nr-softmodem', 'nr-uesoftmodem'), viewer_workspaces):
+        (output / 'structure-viewer' / (target + '.json')).write_text(json.dumps(value, indent=2) + '\n')
+    (output / 'structure-viewer/manifest.json').write_text(json.dumps(viewer_manifest, indent=2) + '\n')
+    export_viewer(viewer_workspaces, output / 'structure-demo.html', data)
+    export_viewer(viewer_workspaces, output / 'structure-only.html')
     suite = unittest.defaultTestLoader.discover(str(ROOT / 'tests'), pattern='test_*.py')
     with (output / 'tests.log').open('w') as log:
         result = unittest.TextTestRunner(stream=Tee(sys.stdout, log), verbosity=2).run(suite)
