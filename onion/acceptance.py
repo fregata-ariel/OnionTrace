@@ -53,10 +53,10 @@ def export_acceptance(manifest, extraction, out, *, oai=False):
         for target in ('nr-softmodem', 'nr-uesoftmodem'):
             def export_target(target=target):
                 workspace = connect(manifest, extraction, target)
-                write(out / target / 'workspace.json', workspace)
-                write(out / target / 'structure.json', workspace['structure'])
+                write(out / target / 'workspace.json', workspace, compact=oai)
+                write(out / target / 'structure.json', workspace['structure'], compact=oai)
                 view = project_workspace(workspace)
-                write(out / target / 'view.json', view)
+                write(out / target / 'view.json', view, compact=oai)
                 views.append(view)
                 categories = {r['category'] for r in view['references']}
                 # References must open a real CFG, never a manufactured empty view.

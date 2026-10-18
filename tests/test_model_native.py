@@ -96,6 +96,23 @@ class ModelNativeTests(unittest.TestCase):
         self.assertEqual(callbacks, callback_snapshot)
         self.assertEqual(self.workspace['sources'], {'threads': threads, 'callbacks': callbacks, 'queues': queues})
 
+    def test_navigation_budget_counts_expansion_and_preserves_parent_evidence(self):
+        by_id = {r['id']: r for r in self.workspace['references']}
+        descendants = [r for r in by_id.values() if r['category'] == 'synchronous_descendant']
+        self.assertTrue(descendants)
+        for child in descendants:
+            record = child['source_record']
+            parent = by_id[record['parent_reference_id']]
+            self.assertEqual(parent['origin_id'], child['origin_id'])
+            self.assertEqual(record['call_path'][:-1], parent['source_record'].get('call_path', []))
+            self.assertTrue(set(parent['relation_ids']) <= set(child['relation_ids']))
+            self.assertNotIn('entry_context', record)
+        bounded = connect(self.manifest, self.extraction, 'integration_fixture', max_descendants=1)
+        self.assertEqual(sum(r['category'] == 'synchronous_descendant' for r in bounded['references']), 1)
+        self.assertTrue(any(g.get('limit') == 1 for g in bounded['incompleteness']))
+        with self.assertRaisesRegex(ValueError, 'bound must be positive'):
+            connect(self.manifest, self.extraction, 'integration_fixture', max_descendants=0)
+
     def test_child_interval_build_isolation_and_serialization(self):
         ref = self.ref('callee')
         region = open_region(self.workspace, ref['id'], sites())

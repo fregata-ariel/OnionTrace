@@ -27,12 +27,60 @@ ENVIRONMENT = ("PATH", "CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "OBJC_IN
 LINK_ONLY_ARGUMENTS = ('-rdynamic',)
 
 
+def json_chunks(value, encoder):
+    """Encode bounded subtrees in C while streaming large container boundaries."""
+    def small(item, budget):
+        if isinstance(item, str):
+            return budget - 6 * len(item) - 2
+        if isinstance(item, dict):
+            for key, child in item.items():
+                budget = small(key, budget - 2)
+                if budget < 0:
+                    return budget
+                budget = small(child, budget)
+                if budget < 0:
+                    return budget
+            return budget - 2
+        if isinstance(item, (list, tuple)):
+            for child in item:
+                budget = small(child, budget - 1)
+                if budget < 0:
+                    return budget
+            return budget - 2
+        return budget - 32
+
+    def chunks(item):
+        # Keep CPython's C encoder for bounded subtrees; Python's atom-by-atom
+        # iterencode is prohibitively slow for repeated native CFG documents.
+        if small(item, 256 * 1024) >= 0:
+            yield encoder.encode(item)
+        elif isinstance(item, dict) and all(isinstance(k, str) for k in item):
+            yield '{'
+            for index, key in enumerate(sorted(item) if encoder.sort_keys else item):
+                if index:
+                    yield encoder.item_separator
+                yield encoder.encode(key) + encoder.key_separator
+                yield from chunks(item[key])
+            yield '}'
+        elif isinstance(item, (list, tuple)):
+            yield '['
+            for index, child in enumerate(item):
+                if index:
+                    yield encoder.item_separator
+                yield from chunks(child)
+            yield ']'
+        else:
+            yield encoder.encode(item)
+
+    yield from chunks(value)
+
+
 def digest(value):
     # Preserve canonical bytes without allocating the entire JSON twice.
     hasher = sha256()
     parts, size = [], 0
     encoder = json.JSONEncoder(sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    for part in encoder.iterencode(value):
+    for part in json_chunks(value, encoder):
         parts.append(part)
         size += len(part)
         if size >= 1024 * 1024:

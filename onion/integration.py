@@ -28,13 +28,15 @@ def _intact(value, kind):
         raise ValueError('changed or invalid ' + kind)
 
 
-def connect(manifest, extraction, target):
+def connect(manifest, extraction, target, *, max_descendants=10000):
     """Build one target-scoped T1 structure plus navigable source references.
 
     Build identity includes the full manifest; shared TUs are scoped separately
     per executable. Absolute source paths are represented relative to filesystem
     root in T1 identities. Original ranges, guards and ownership stay in sources.
     """
+    if max_descendants < 1:
+        raise ValueError('navigation expansion bound must be positive')
     threads = build_threads(manifest, extraction, [target])
     callbacks = _callbacks_from_threads(manifest, extraction, threads)
     queues = _queues_from_sources(manifest, extraction, threads, callbacks)
@@ -199,11 +201,9 @@ def connect(manifest, extraction, target):
     navigation_gaps = []
     seeds = [r for r in references if r['category'] not in ('call_site', 'callee')]
     todo = [(r, [r['function_id']]) for r in seeds]
+    descendants = 0
     while todo:
         ref, stack = todo.pop()
-        if len(references) >= 10000:
-            navigation_gaps.append({'reason': 'navigation reference limit reached'})
-            break
         raw_id = functions[ref['function_id']]['source_function_id']
         for row in calls_by_source.get(raw_id, []):
             if row['api']:
@@ -214,9 +214,18 @@ def connect(manifest, extraction, target):
             if fid in stack or len(stack) >= 128:
                 navigation_gaps.append({'origin_id': ref['origin_id'], 'reason': 'navigation recursion/depth limit'})
                 continue
+            # Inventory references do not consume the expansion budget.
+            if descendants >= max_descendants:
+                navigation_gaps.append({'reason': 'navigation reference limit reached',
+                                        'limit': max_descendants})
+                todo.clear()
+                break
+            # The sealed parent retains the complete entry context once. Copying
+            # that recursively into every descendant grows quadratically.
             record = {'parent_reference_id': ref['id'], 'call_path': [*ref['source_record'].get('call_path', []), row['id']],
-                      'entry_context': ref['source_record'], 'call': row}
+                      'call': row}
             child = reference(ref['origin_id'], row['target'], [*ref['relation_ids'], by_call[row['id']]], record, 'synchronous_descendant')
+            descendants += 1
             todo.append((child, [*stack, fid]))
     structure = make_structure(list(entities.values()), list(relations.values()))
     return _seal('execution_workspace', {'structure': structure, 'build_id': build, 'target': target,

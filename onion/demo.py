@@ -9,6 +9,7 @@ import subprocess
 
 from .cfg import build_model, parse_dump
 from .core import reconstruct, recommend, accumulate
+from .build_inputs import json_chunks
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -33,7 +34,7 @@ def render_report(data, destination):
     before, after = template.split('/*__ONION_DATA__*/null')
     with destination.open('w') as stream:
         stream.write(before)
-        for part in json.JSONEncoder(ensure_ascii=False).iterencode(data):
+        for part in json_chunks(data, json.JSONEncoder(ensure_ascii=False)):
             stream.write(part.replace('<', '\\u003c').replace('\u2028', '\\u2028').replace('\u2029', '\\u2029'))
         stream.write(after)
 

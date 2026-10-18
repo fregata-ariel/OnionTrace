@@ -12,17 +12,21 @@ import subprocess
 import tempfile
 
 from .build_inputs import (ENVIRONMENT, command, compiler_record, digest, file_record,
-                           run, validate_entry, validation_args, LINK_ONLY_ARGUMENTS, read_json)
+                           run, validate_entry, validation_args, LINK_ONLY_ARGUMENTS, read_json, json_chunks)
 
 
 WARNINGS = ['-Werror=unknown-warning-option', '-Werror=unused-command-line-argument',
             '-Werror=ignored-optimization-argument']
 
 
-def write(path, value):
+def write(path, value, *, compact=False):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open('w') as stream:
-        json.dump(value, stream, indent=2)
+        if compact:
+            for part in json_chunks(value, json.JSONEncoder(separators=(',', ':'))):
+                stream.write(part)
+        else:
+            json.dump(value, stream, indent=2)
         stream.write('\n')
 
 

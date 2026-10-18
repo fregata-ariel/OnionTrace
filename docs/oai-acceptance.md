@@ -48,7 +48,11 @@ CIは`--capture-only`でnative抽出まで実行して`oai-native-*` Artifactを
 モデル構築時に再検証する。再構成stepは20分・仮想メモリ6GiBを上限とし、runner停止前に失敗を
 診断できるようにする。native Artifactは総合受入の代わりにはならない。
 大きなJSONの書出し・canonical hash・ファイルhashは逐次処理し、読込みでは同じpath/ID文字列を共有する。
-既存canonical ID・出力JSONの内容は変えない。Clangが到達不能と記録した空の後続先は、
+I/Oの変更はcanonical IDとJSONの値を変えない。OAIのworkspace/structure/viewは空白を省いた
+JSONで保存する。同期子参照は親参照IDとcall pathで文脈を保持し、親の本文を再帰コピーしない。
+ナビゲーション上限（既定10,000件）は新しく展開する同期子参照を数え、元のcall-site一覧は数えない。
+上限・再帰/深さで止めた場合はincompletenessを残し、総合gateを不合格にする。
+Clangが到達不能と記録した空の後続先は、
 `AdjacentBlock::isReachable()`で判別する。`do { ... } while (0)`の既知の剪定を未知のCFGとして
 関数全体へ波及させず、到達不能の呼出し自体は解決済みのthread生成へ含めない。
 

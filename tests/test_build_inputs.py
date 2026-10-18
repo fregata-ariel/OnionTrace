@@ -31,6 +31,10 @@ class JsonProtocolTests(unittest.TestCase):
             self.assertEqual(read_json(path), value)
             self.assertEqual(path.read_text(), json.dumps(value, indent=2) + '\n')
             self.assertEqual(file_record(path)['sha256'], 'sha256:' + sha256(path.read_bytes()).hexdigest())
+            compact = Path(temporary) / 'compact.json'
+            write(compact, value, compact=True)
+            self.assertEqual(read_json(compact), value)
+            self.assertLess(compact.stat().st_size, path.stat().st_size)
 
 
 class BuildInputTests(unittest.TestCase):
