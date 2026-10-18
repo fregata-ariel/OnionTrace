@@ -188,7 +188,9 @@ public:
     V["shape"] = "opaque";
     V["pointer"] = A->getType()->isPointerType();
     if (Depth > 16) { V["reason"] = "expression depth limit"; return V; }
-    if (A->isNullPointerConstant(Ctx, Expr::NPC_ValueDependentIsNotNull)) { V["shape"] = "null"; return V; }
+    if (Input->getType()->isPointerType() && Input->isNullPointerConstant(Ctx, Expr::NPC_ValueDependentIsNotNull)) {
+      V["shape"] = "null"; return V;
+    }
     if (const auto *R = dyn_cast<DeclRefExpr>(A)) {
       if (const auto *D = dyn_cast<VarDecl>(R->getDecl())) {
         V["shape"] = "storage"; V["usr"] = usr(D);

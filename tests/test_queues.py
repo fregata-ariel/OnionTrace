@@ -84,6 +84,15 @@ class QueueNativeTests(unittest.TestCase):
             self.assertTrue(actor['context']['role_id'].startswith('thread/'))
         self.assertTrue(all(o['context']['call_path'] for o in submits))
 
+    def test_constant_array_zero_and_one_are_distinct_source_objects(self):
+        producer = next(o for o in self.ops('enqueue', 'main') if o['queue_candidates'] and
+                        o['queue_candidates'][0]['indices'] == ['0'])
+        consumer = next(o for o in self.ops('dequeue', 'main') if o['queue_candidates'] and
+                        o['queue_candidates'][0]['indices'] == ['1'])
+        self.assertTrue(producer['queue_candidates'][0]['concrete'])
+        self.assertFalse(_compatible(producer['queue_candidates'][0], consumer['queue_candidates'][0]))
+        self.assertFalse(any(r['source'] == producer['id'] and r['target'] == consumer['id'] for r in self.graph['relations']))
+
     def test_response_metadata_and_callback_links_remain_candidates(self):
         relations = self.graph['relations']
         self.assertTrue(any(r['kind'] == 'returns_to' for r in relations))

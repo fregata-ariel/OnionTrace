@@ -1,5 +1,6 @@
 #include "queues.h"
 Owner first, second;
+Owner owners[2];
 typedef struct { notifiedFIFO_t resp_L1, L1_rx_out; } Gnb;
 typedef struct { Gnb *gNB; } RxData;
 Gnb gnb;
@@ -69,6 +70,9 @@ int main(void) {
   threadCreate(&c, L1_rx_thread, &gnb, "rx", 0, 0);
   wait_free_rx_tti(&gnb.L1_rx_out);
   abortNotifiedFIFO(&first.fifo);
+  initNotifiedFIFO(&owners[0].fifo); initNotifiedFIFO(&owners[1].fifo);
+  pushNotifiedFIFO(&owners[0].fifo, NULL);
+  pullNotifiedFIFO(&owners[1].fifo);
   if (0) pushNotifiedFIFO(&second.fifo, e);
   return 0;
 }
