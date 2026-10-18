@@ -232,7 +232,9 @@ class RegionTests(unittest.TestCase):
 
     def test_child_cannot_reopen_edge_past_parent_exit(self):
         w = copy.deepcopy(self.workspace)
-        w['extractions']['raw']['functions'][0]['edges'].append({'source': 'end', 'target': 'ib'})
+        function = w['extractions']['raw']['functions'][0]
+        function['edges'] = [e for e in function['edges'] if e['source'] != 'end']
+        function['edges'].append({'source': 'end', 'target': 'ib'})
         w = reseal(w)
         parent = open_region(w, self.ref['id'], sites())
         original = copy.deepcopy(parent)
