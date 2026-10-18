@@ -99,7 +99,7 @@ test('standalone structure is offline, keyboard accessible and fits a narrow vie
   await page.setViewportSize({width:1440,height:1100});
   await page.screenshot({path:testInfo.outputPath('structure-desktop.png'),fullPage:true});
 });
-test('large branches and CFGs only render requested pages and preserve cyclic references',async({page})=>{
+for(const selection of ['click','Enter','Space'])test(`large branches and CFGs retain paging and selection with ${selection}`,async({page})=>{
   await page.goto(url('structure-only.html'));
   await page.evaluate(()=>{
     const v=DATA.execution_views[0],root=v.roots[0],sample=v.links[0];
@@ -112,7 +112,7 @@ test('large branches and CFGs only render requested pages and preserve cyclic re
     const ref=v.references[0];
     for(let i=0;i<80;i++)v.references.push({...ref,id:'large/ref/'+i,origin_id:root,function_id:root,category:'large'});
     const cfg=v.cfgs[root];
-    cfg.nodes=Array.from({length:125},(_,i)=>({id:'large/block/'+i,clang_id:'B'+i,entry:i===0,exit:i===124,sites:[],source_block:{elements:[]}}));
+    cfg.nodes=Array.from({length:125},(_,i)=>({id:'large/block/'+i,clang_id:'B'+i,entry:i===0,exit:i===124,sites:[],source_block:{elements:[],block_index:i}}));
     cfg.edges=cfg.nodes.slice(1).map((n,i)=>({source:cfg.nodes[i].id,target:n.id}));
   });
   await page.getByRole('button',{name:'main を展開・折り畳み',exact:true}).click();
@@ -125,10 +125,27 @@ test('large branches and CFGs only render requested pages and preserve cyclic re
   await page.getByRole('button',{name:/^参照をさらに表示/}).click();
   await expect(page.locator('#structure-references button')).toHaveCount(34);
   await page.getByRole('button',{name:'CFGを開く: main',exact:true}).click();
+  async function selectBlock(index){
+    const block=page.locator(`#graph .node[aria-label="B${index}"]`);
+    if(selection==='click')await block.click();
+    else{await block.focus();await block.press(selection);}
+    await expect(page.locator('#graph .node.selected')).toHaveAttribute('aria-label',`B${index}`);
+    await expect(page.locator('#details')).toContainText(`"block_index": ${index}`);
+  }
   await expect(page.locator('#graph .node')).toHaveCount(60);
+  await selectBlock(5);
+  await expect(page.locator('#cfg-more')).toHaveCount(1);
   await page.locator('#cfg-more').click();
   await expect(page.locator('#graph .node')).toHaveCount(120);
+  await expect(page.locator('#graph .node.selected')).toHaveAttribute('aria-label','B5');
+  await expect(page.locator('#details')).toContainText('"block_index": 5');
+  await selectBlock(80);
+  await expect(page.locator('#cfg-more')).toHaveCount(1);
   await page.locator('#cfg-more').click();
   await expect(page.locator('#graph .node')).toHaveCount(125);
+  await expect(page.locator('#graph .node.selected')).toHaveAttribute('aria-label','B80');
+  await expect(page.locator('#details')).toContainText('"block_index": 80');
+  await expect(page.locator('#cfg-more')).toHaveCount(0);
+  await selectBlock(124);
   await expect(page.locator('#cfg-more')).toHaveCount(0);
 });
