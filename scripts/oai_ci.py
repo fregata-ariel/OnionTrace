@@ -14,7 +14,7 @@ import traceback
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from onion.build_inputs import LOCK, collect, git_provenance, query, file_record
+from onion.build_inputs import LOCK, collect, git_provenance, query, file_record, read_json
 from onion.libtooling import extract_manifest, write
 from onion.acceptance import export_acceptance
 from onion.oai_threads import audit_sources as audit_threads, EXPECTATIONS as THREADS
@@ -45,7 +45,7 @@ def run_acceptance(out, tool, *, jobs=2, capture_only=False):
             row['passed'] = True
             return value
         except Exception as error:
-            row['failure'] = str(error)
+            row['failure'] = str(error) or type(error).__name__
             (out / (name + '-error.log')).write_text(traceback.format_exc())
             raise
         finally:
@@ -139,7 +139,7 @@ def run_acceptance(out, tool, *, jobs=2, capture_only=False):
         stage('acceptance', accept)
         result.update(passed=True, full_extraction_verified=True)
     except Exception as error:
-        result['failure'] = str(error)
+        result['failure'] = str(error) or type(error).__name__
     finally:
         write(out / 'run.json', result)
         write(out / 'failures.json', [s for s in stages if not s['passed']] +
@@ -168,8 +168,8 @@ def resume_acceptance(out):
         for record in result['captured_inputs'] + result['binaries']:
             if file_record(record['path']) != record:
                 raise ValueError('captured input or binary changed: ' + record['path'])
-        manifest = json.loads((out / 'inputs/manifest.json').read_text())
-        extraction = json.loads((out / 'extraction/extraction.json').read_text())
+        manifest = read_json(out / 'inputs/manifest.json')
+        extraction = read_json(out / 'extraction/extraction.json')
         acceptance = export_acceptance(manifest, extraction, out / 'acceptance', oai=True)
         if not acceptance['passed']:
             raise ValueError('OAI acceptance failed; see acceptance/failures.json')
@@ -177,7 +177,7 @@ def resume_acceptance(out):
         result.update(passed=True, full_extraction_verified=True, pending_stages=[])
         result.pop('failure', None)
     except Exception as error:
-        row['failure'] = result['failure'] = str(error)
+        row['failure'] = result['failure'] = str(error) or type(error).__name__
         (out / 'acceptance-error.log').write_text(traceback.format_exc())
     finally:
         row['seconds'] = round(time.monotonic() - start, 2)

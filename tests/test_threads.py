@@ -63,6 +63,37 @@ class ThreadTests(unittest.TestCase):
         # threadCreate's implementation must not generate a duplicate spawn.
         self.assertEqual(sum(s['api'] == 'threadCreate' for s in spawns), 2)
 
+    def test_pruned_null_macro_successor_does_not_block_reachable_thread_creation(self):
+        source = self.out / 'pruned-macro'
+        source.mkdir()
+        (source / 'CMakeLists.txt').write_text('cmake_minimum_required(VERSION 3.20)\nproject(pruned C)\n'
+                                            'set(CMAKE_EXPORT_COMPILE_COMMANDS ON)\n'
+                                            'add_executable(pruned main.c)\n')
+        (source / 'main.c').write_text('''
+typedef unsigned long pthread_t;
+extern int pthread_create(pthread_t *, const void *, void *(*)(void *), void *);
+static void *worker(void *p) { return p; }
+int main(void) {
+  pthread_t thread;
+  do { (void)0; } while (0);
+  if (0) pthread_create(&thread, 0, worker, 0);
+  return pthread_create(&thread, 0, worker, 0);
+}
+''')
+        build = source / 'build'
+        query(build)
+        run(['cmake', '-S', source, '-B', build, '-G', 'Ninja', '-DCMAKE_C_COMPILER=' + self.cc])
+        manifest = collect(build, ['pruned'])
+        extraction = extract_manifest(manifest, self.tool, source / 'extraction')
+        graph = build_threads(manifest, extraction)['graphs'][0]
+        self.assertEqual(len(graph['spawns']), 1)
+        self.assertEqual(graph['spawns'][0]['resolution'], 'resolved')
+        main = next(f for f in graph['functions'] if f['name'] == 'main')
+        self.assertTrue(any(s['kind'] == 'unreachable' and s['target'] is None
+                            for b in main['blocks'] for s in b['successors']))
+        self.assertFalse(any(u['affects_completeness'] for u in main['uncertainties']))
+        self.assertTrue(any('CFG placement' in f['reason'] for f in graph['frontiers']))
+
     def test_conditions_loops_and_source_evidence(self):
         guards = [g for s in self.gnb['spawns'] for g in s['conditions']]
         self.assertTrue({'then', 'else', 'loop_body'} <= {g['branch'] for g in guards})

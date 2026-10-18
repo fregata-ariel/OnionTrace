@@ -6,7 +6,7 @@ import shutil
 
 from .integration import connect
 from .libtooling import write
-from .viewer import export_viewer, project_workspace
+from .viewer import _export_views, project_workspace
 from .oai_threads import verify_paths, EXPECTATIONS as THREADS
 from .oai_callbacks import verify_extraction as verify_callbacks, EXPECTATIONS as CALLBACKS
 from .oai_queues import verify_extraction as verify_queues, EXPECTATIONS as QUEUES
@@ -49,7 +49,7 @@ def export_acceptance(manifest, extraction, out, *, oai=False):
         summary['gates'].append({'name': 'inputs', 'passed': False,
                                  'failure': 'capture and extraction must both be ready'})
     else:
-        workspaces = []
+        views = []
         for target in ('nr-softmodem', 'nr-uesoftmodem'):
             def export_target(target=target):
                 workspace = connect(manifest, extraction, target)
@@ -57,7 +57,7 @@ def export_acceptance(manifest, extraction, out, *, oai=False):
                 write(out / target / 'structure.json', workspace['structure'])
                 view = project_workspace(workspace)
                 write(out / target / 'view.json', view)
-                workspaces.append(workspace)
+                views.append(view)
                 categories = {r['category'] for r in view['references']}
                 # References must open a real CFG, never a manufactured empty view.
                 valid = all(r['function_id'] in view['cfgs'] and
@@ -75,9 +75,9 @@ def export_acceptance(manifest, extraction, out, *, oai=False):
                 summary['targets'].append(result)
                 return result
             gate(target, export_target)
-        if len(workspaces) == 2:
+        if len(views) == 2:
             def viewer():
-                export_viewer(workspaces, out / 'structure.html')
+                _export_views(views, out / 'structure.html')
                 return {'passed': True, 'file': 'structure.html', 'runtime_evidence': False}
             gate('viewer', viewer)
         if oai:

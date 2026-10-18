@@ -1,5 +1,6 @@
 """Real CMake File API/compile DB regressions; no external OAI checkout."""
 import copy
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -13,9 +14,23 @@ import unittest
 from unittest.mock import patch
 
 from onion.build_inputs import collect, dependency_inventory, git_provenance, query, validation_args
-from onion.build_inputs import cmake_model, ownership_index, owner_for, command, absolute
+from onion.build_inputs import cmake_model, ownership_index, owner_for, command, absolute, digest, read_json, file_record
+from onion.libtooling import write
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class JsonProtocolTests(unittest.TestCase):
+    def test_streaming_io_preserves_existing_canonical_ids_and_file_hashes(self):
+        value = {'z': ['日本語', -0.0, True, None], 'a': [{'path': '/same/path', 'text': 'x' * 2048}] * 1024}
+        canonical = json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode()
+        self.assertEqual(digest(value), 'sha256:' + sha256(canonical).hexdigest())
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'large.json'
+            write(path, value)
+            self.assertEqual(read_json(path), value)
+            self.assertEqual(path.read_text(), json.dumps(value, indent=2) + '\n')
+            self.assertEqual(file_record(path)['sha256'], 'sha256:' + sha256(path.read_bytes()).hexdigest())
 
 
 class BuildInputTests(unittest.TestCase):
@@ -71,6 +86,18 @@ class BuildInputTests(unittest.TestCase):
         self.assertEqual(subset['context']['analysis_scope']['kind'], 'explicit_source_subset')
         self.assertTrue(all('not analyzed' in r['reason'] for r in subset['entries']
                             if r['status'] == 'excluded' and r['selected_by']))
+        for row in subset['entries']:
+            if row['status'] != 'excluded':
+                continue
+            self.assertIn(row['raw'], [e['raw'] for e in whole['entries']])
+            reference = row['target']['compile_group_reference']
+            target = json.loads(Path(reference['json_file']).read_text())
+            self.assertEqual(reference['index'], row['target']['source']['compileGroupIndex'])
+            self.assertLess(reference['index'], len(target['compileGroups']))
+            if row['selected_by']:
+                self.assertEqual(target['compileGroups'][reference['index']],
+                                 next(e['target']['compile_group'] for e in whole['entries']
+                                      if e['raw'] == row['raw']))
 
     def test_requested_source_outside_target_closure_or_missing_db_is_failure(self):
         result = collect(self.build, ['nr-softmodem', 'nr-uesoftmodem'], sources=['unrelated.c'])

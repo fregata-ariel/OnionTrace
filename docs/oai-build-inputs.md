@@ -86,7 +86,10 @@ JSON、cwd、ソース所属またはターゲットが不整合なら成功扱�
 | `excluded.json` | 選択ターゲットの依存閉包に属さないエントリと理由 |
 | `failures.json` | 構文エラー、生成物不足、未対応条件、入力不整合と理由・診断 |
 
-エントリはcompile DBの順序・原文・引数配列・cwdを保持する。同一ソースが複数ターゲット・
+エントリはcompile DBの順序・原文・cwdを保持し、解析対象には展開した引数配列も保持する。
+未解析の除外エントリは元コマンドを`raw`に残し、compile groupの重複コピーの代わりに
+`target.compile_group_reference`からhash付きFile API内のgroupを参照する。
+同一ソースが複数ターゲット・
 複数条件でコンパイルされる場合もまとめない。出力オブジェクトのターゲットディレクトリと
 File APIのソース所属・compileGroupIndexを照合する。File APIの対象TUがcompile DBに無い場合も失敗。
 大きなASN.1 targetでも各エントリから全ソースを再走査しないよう、解決済みのobject出力prefixと

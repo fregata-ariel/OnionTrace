@@ -9,7 +9,7 @@ import copy
 import json
 from pathlib import Path
 
-from .build_inputs import digest, file_record
+from .build_inputs import digest, file_record, read_json
 from .libtooling import validate_extraction, write
 
 
@@ -39,7 +39,7 @@ def _load(manifest, extraction):
             record = result['artifact']
             if file_record(record['path']) != record:
                 raise ValueError('source extraction artifact changed')
-            raw = validate_extraction(json.loads(Path(record['path']).read_text()))
+            raw = validate_extraction(read_json(record['path']))
             if raw['compilation_id'] != row['cache_key']:
                 raise ValueError('raw compilation_id mismatch')
             # Old T3 files can still feed the local CFG adapter, but must be
@@ -131,7 +131,9 @@ def build_threads(manifest, extraction, targets=None, *, max_contexts=10000, max
             for function in raw['functions']:
                 if function['id'] in functions:
                     raise ValueError('duplicate function across extraction artifacts')
-                functions[function['id']] = {**copy.deepcopy(function), '_compilation_id': raw['compilation_id']}
+                # The raw record was freshly decoded for this operation. Only
+                # add ownership; nested CFGs/evidence are never mutated here.
+                functions[function['id']] = {**function, '_compilation_id': raw['compilation_id']}
         mains = [f['id'] for f in functions.values() if f['name'] == 'main' and f['linkage'] == 'external']
         definitions = {}
         for function in functions.values():

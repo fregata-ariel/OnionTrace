@@ -97,12 +97,17 @@ def project_workspace(workspace):
 
 def export_viewer(workspaces, destination, session=None):
     """Keep an optional existing fixture timeline detached from static builds."""
+    return _export_views([project_workspace(w) for w in workspaces], destination, session)
+
+
+def _export_views(views, destination, session=None):
+    """Serialize projections already validated in the current operation."""
     data = copy.deepcopy(session) if session is not None else {
         'schema_version': 1, 'stages': [], 'oai_cfg': [],
         'limits': ['ソース抽出の静的構造です。実行証跡・実行時間は含みません。',
                    '非同期接続は関数内CFGの辺へ追加しません。',
                    '抽出・検証の対象範囲と未解決点は付属のmanifest・受入結果で確認してください。']}
-    data['execution_views'] = [project_workspace(w) for w in workspaces]
+    data['execution_views'] = views
     if not data['execution_views']:
         raise ValueError('provide at least one workspace')
     if len({v['id'] for v in data['execution_views']}) != len(data['execution_views']):

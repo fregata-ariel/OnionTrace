@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 
 from .build_inputs import (ENVIRONMENT, command, compiler_record, digest, file_record,
-                           run, validate_entry, validation_args, LINK_ONLY_ARGUMENTS)
+                           run, validate_entry, validation_args, LINK_ONLY_ARGUMENTS, read_json)
 
 
 WARNINGS = ['-Werror=unknown-warning-option', '-Werror=unused-command-line-argument',
@@ -21,7 +21,9 @@ WARNINGS = ['-Werror=unknown-warning-option', '-Werror=unused-command-line-argum
 
 def write(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2) + '\n')
+    with path.open('w') as stream:
+        json.dump(value, stream, indent=2)
+        stream.write('\n')
 
 
 def _check_manifest(manifest):
@@ -106,7 +108,7 @@ def extract_manifest(manifest, tool, out):
             result.update(log=str(log_path), returncode=completed.returncode)
             if completed.returncode:
                 raise ValueError('LibTooling failed; see entry log')
-            raw = json.loads(raw_path.read_text())
+            raw = read_json(raw_path)
             validate_extraction(raw)
             if raw['compilation_id'] != row['cache_key'] or 'clang version 18.' not in raw['clang_version']:
                 raise ValueError('extractor compilation/version mismatch')

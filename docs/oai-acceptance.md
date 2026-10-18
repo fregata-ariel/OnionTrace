@@ -47,6 +47,10 @@ CIは`--capture-only`でnative抽出まで実行して`oai-native-*` Artifactを
 再開時にOnionTrace commit、manifest、抽出一覧、両実行ファイルのhashを照合し、各nativeファイルも
 モデル構築時に再検証する。再構成stepは20分・仮想メモリ6GiBを上限とし、runner停止前に失敗を
 診断できるようにする。native Artifactは総合受入の代わりにはならない。
+大きなJSONの書出し・canonical hash・ファイルhashは逐次処理し、読込みでは同じpath/ID文字列を共有する。
+既存canonical ID・出力JSONの内容は変えない。Clangが到達不能と記録した空の後続先は、
+`AdjacentBlock::isReachable()`で判別する。`do { ... } while (0)`の既知の剪定を未知のCFGとして
+関数全体へ波及させず、到達不能の呼出し自体は解決済みのthread生成へ含めない。
 
 通常のソース監査JSON、手書きのgraph、fixture、別revisionは総合gateを通過できない。
 `full_extraction_verified`は上記の明示した解析範囲で全gateが合格した実OAI runだけtrueになる。

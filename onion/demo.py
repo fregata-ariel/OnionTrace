@@ -30,8 +30,12 @@ def render_report(data, destination):
     template = template.replace('/*__STRUCTURE_CSS__*/', (ROOT / 'viewer/structure.css').read_text())
     template = template.replace('/*__STRUCTURE_JS__*/', (ROOT / 'viewer/structure.js').read_text())
     # Prevent script termination even when source snippets contain HTML.
-    payload = json.dumps(data, ensure_ascii=False).replace('<', '\\u003c').replace('\u2028', '\\u2028').replace('\u2029', '\\u2029')
-    destination.write_text(template.replace('/*__ONION_DATA__*/null', payload))
+    before, after = template.split('/*__ONION_DATA__*/null')
+    with destination.open('w') as stream:
+        stream.write(before)
+        for part in json.JSONEncoder(ensure_ascii=False).iterencode(data):
+            stream.write(part.replace('<', '\\u003c').replace('\u2028', '\\u2028').replace('\u2029', '\\u2029'))
+        stream.write(after)
 
 
 def run_demo(out, compiler, oai_dump=None):
