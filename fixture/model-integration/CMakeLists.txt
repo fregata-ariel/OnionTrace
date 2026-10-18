@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.20)
+project(model_integration C)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+add_executable(integration_fixture main.c ../queues/runtime.c)
+target_include_directories(integration_fixture PRIVATE ../queues)
+add_executable(integration_other main.c ../queues/runtime.c)
+target_include_directories(integration_other PRIVATE ../queues)
+target_compile_definitions(integration_other PRIVATE OTHER_TARGET=1)

@@ -19,6 +19,7 @@ from onion.build_inputs import collect
 from onion.threads import build_threads
 from onion.callbacks import build_callbacks
 from onion.queues import build_queues
+from onion.integration import connect
 
 
 class Tee:
@@ -112,6 +113,16 @@ def main():
         (output / 'queues' / (name + '.json')).write_text(json.dumps(value, indent=2) + '\n')
     if not queue_graph['ready'] or any(not g['operations'] for g in queue_graph['graphs']):
         raise RuntimeError('Queue fixture extraction failed')
+    integration_build = output / 'integration/build'
+    query(integration_build)
+    subprocess.run(['cmake', '-S', str(ROOT / 'fixture/model-integration'), '-B', str(integration_build),
+                    '-G', 'Ninja', '-DCMAKE_C_COMPILER=' + options.cc], check=True)
+    subprocess.run(['cmake', '--build', str(integration_build)], check=True)
+    integration_manifest = collect(integration_build, ['integration_fixture', 'integration_other'])
+    integration_extraction = extract_manifest(integration_manifest, tool, output / 'integration/extraction')
+    workspace = connect(integration_manifest, integration_extraction, 'integration_fixture')
+    for name, value in [('manifest', integration_manifest), ('workspace', workspace), ('structure', workspace['structure'])]:
+        (output / 'integration' / (name + '.json')).write_text(json.dumps(value, indent=2) + '\n')
     suite = unittest.defaultTestLoader.discover(str(ROOT / 'tests'), pattern='test_*.py')
     with (output / 'tests.log').open('w') as log:
         result = unittest.TextTestRunner(stream=Tee(sys.stdout, log), verbosity=2).run(suite)
