@@ -54,3 +54,11 @@ See [docs/libtooling-extractor.md](docs/libtooling-extractor.md) for schema,
 argument adjustments, failure behavior and scoped IDs. These are source CFG and
 call-site records, not runtime evidence or T1 execution_structure documents.
 The adapter preserves uncertainties and exact marker mappings into Model v1.
+
+## M1/T7 region exploration boundary
+
+`onion/integration.py` connects T4–T6 source graphs to T1 structures and the local Core.
+Its workspace, region and reconstruction documents retain scoped references, parent regions,
+plan snapshots and per-run provenance. Trace headers also carry the exact region scope and
+plan-content digest. See [docs/model-integration.md](docs/model-integration.md) for the API,
+observation boundaries and conservative treatment of unresolved asynchronous connections.

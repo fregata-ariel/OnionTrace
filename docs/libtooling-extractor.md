@@ -2,7 +2,7 @@
 
 T3 (#5, parent #12) consumes T2's `build_input_manifest`. It provides source CFGs
 and call sites for T4's thread-entrypoint extraction. It does not perform T4's
-cross-TU resolution or T9's execution-structure/navigation integration.
+cross-TU resolution or T7's execution-structure/navigation integration.
 
 ## Build and run
 
@@ -83,7 +83,7 @@ occurrence. Block IDs add the Clang block number. These distinguish variants and
 same-named static functions, but **are not stable across builds or edits**. USRs
 alone are insufficient to join internal linkage, variants or different builds.
 Raw IDs belong to this document kind; they do not masquerade as T1's hashed
-`execution_structure` entities. T9 will create those entities with explicit scope.
+`execution_structure` entities. T7 creates those entities with explicit scope; see [model-integration](model-integration.md).
 
 `onion.libtooling.build_model` maps semantic marker DeclRefExprs exactly once and
 adapts one selected function to the existing local Core API. Missing/duplicate
