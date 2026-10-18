@@ -38,7 +38,7 @@ def connect(manifest, extraction, target):
     threads = build_threads(manifest, extraction, [target])
     callbacks = build_callbacks(manifest, extraction, [target])
     queues = build_queues(manifest, extraction, [target])
-    rows, failures = _load(manifest, extraction)
+    rows, _ = _load(manifest, extraction)
     tg, cg, qg = (doc['graphs'][0] for doc in (threads, callbacks, queues))
     entities, relations, references, functions = {}, {}, [], {}
     source = manifest['context']['source']
@@ -53,7 +53,7 @@ def connect(manifest, extraction, target):
     target_id = entity('target', {'program_id': program, 'name': target})
     build = entity('build', {'target_id': target_id,
                             'configuration': {'input_manifest_id': manifest['manifest_id']}})
-    compilations, dependencies = {}, {}
+    compilations, dependencies, raws = {}, {}, {}
     for row, raw in rows:
         if target not in row['selected_by']:
             continue
@@ -63,6 +63,7 @@ def connect(manifest, extraction, target):
             'build_id': build, 'source': path(row['source']), 'directory': path(row['directory']),
             'compiler': json.dumps(row['compiler'], sort_keys=True), 'arguments': row['arguments'],
             'input_digest': digest(row['dependencies'])})
+        raws[raw['compilation_id']] = raw
         compilations[raw['compilation_id']] = compilation
         dependencies[raw['compilation_id']] = {str(Path(d['path']).resolve()): d['sha256'] for d in row['dependencies']}
         for f in raw['functions']:
@@ -70,7 +71,7 @@ def connect(manifest, extraction, target):
                                       'linkage': f['linkage']}, f['name'])
             if fid in functions:
                 raise ValueError('duplicate scoped function identity')
-            functions[fid] = {'raw': raw, 'source_function_id': f['id']}
+            functions[fid] = {'compilation_id': raw['compilation_id'], 'source_function_id': f['id']}
     function_ids = {v['source_function_id']: k for k, v in functions.items()}
     raw_functions = {f['id']: f for f in tg['functions']}
 
@@ -106,6 +107,7 @@ def connect(manifest, extraction, target):
         item = _seal('function_reference', payload)
         if item not in references:
             references.append(item)
+        return item
 
     for row in tg['relations']:
         if row['kind'] != 'calls':
@@ -143,6 +145,13 @@ def connect(manifest, extraction, target):
             if ref['origin_id'] == callback_ids.get(row['target']):
                 fid = next(k for k, v in function_ids.items() if v == ref['function_id'])
                 reference(rid, fid, [rid, *ref['relation_ids']], row, 'callback_execution_candidate')
+    def queue_key(candidate):
+        if isinstance(candidate, dict):
+            return {k: queue_key(v) for k, v in candidate.items() if k not in ('reason', 'name', 'concrete', 'pointer_field')}
+        if isinstance(candidate, list):
+            return [queue_key(v) for v in candidate]
+        return candidate
+
     operation_relations = {}
     operation_origins = {}
     for row in qg['operations']:
@@ -152,7 +161,7 @@ def connect(manifest, extraction, target):
         # A dequeue with unknown source is still a valid T1 unresolved relation.
         refs = row['queue_candidates'] or [None]
         for candidate in refs:
-            queue = None if candidate is None or row['resolution'] == 'unresolved' else entity('queue', {'build_id': build, 'key': digest(candidate)})
+            queue = None if candidate is None or row['resolution'] == 'unresolved' else entity('queue', {'build_id': build, 'key': digest(queue_key(candidate))})
             kind = 'submits' if row['operation'] == 'enqueue' else 'dequeues'
             a, b = (function_ids[row['source']], queue) if kind == 'submits' else (queue, function_ids[row['source']])
             rid = relation(kind, a, b, row, row['source'])
@@ -201,11 +210,11 @@ def connect(manifest, extraction, target):
                 continue
             record = {'parent_reference_id': ref['id'], 'call_path': [*ref['source_record'].get('call_path', []), row['id']],
                       'entry_context': ref['source_record'], 'call': row}
-            reference(ref['origin_id'], row['target'], [*ref['relation_ids'], by_call[row['id']]], record, 'synchronous_descendant')
-            todo.append((references[-1], [*stack, fid]))
+            child = reference(ref['origin_id'], row['target'], [*ref['relation_ids'], by_call[row['id']]], record, 'synchronous_descendant')
+            todo.append((child, [*stack, fid]))
     structure = make_structure(list(entities.values()), list(relations.values()))
     return _seal('execution_workspace', {'structure': structure, 'build_id': build, 'target': target,
-        'functions': functions, 'references': references,
+        'functions': functions, 'extractions': raws, 'references': references,
         'sources': {'threads': threads, 'callbacks': callbacks, 'queues': queues},
         'incompleteness': copy.deepcopy(tg['failures'] + navigation_gaps),
         'frontiers': copy.deepcopy(tg['frontiers'] + cg['frontiers'] + qg['frontiers']),
@@ -231,7 +240,8 @@ def open_region(workspace, reference_id, sites, *, anchors=('work.begin', 'work.
         raise ValueError('select exactly one function reference')
     ref = refs[0]
     source = workspace['functions'][ref['function_id']]
-    model = build_model(source['raw'], source['source_function_id'], sites, workspace['build_id'],
+    raw = workspace['extractions'][source['compilation_id']]
+    model = build_model(raw, source['source_function_id'], sites, workspace['build_id'],
                         {'structure_id': workspace['structure']['structure_id'], 'function_id': ref['function_id']}, anchors=anchors)
     # Local block IDs include compilation but not executable target identity.
     # Scope them by T1 function before accumulating evidence across regions.
@@ -278,7 +288,7 @@ def open_region(workspace, reference_id, sites, *, anchors=('work.begin', 'work.
     # certainty; unrelated source diagnostics remain visible in the workspace.
     record = ref['source_record']
     chain = record.get('call_path', record.get('context', {}).get('call_path', []))
-    local_calls = {c['id'] for c in next(f for f in source['raw']['functions']
+    local_calls = {c['id'] for c in next(f for f in raw['functions']
         if f['id'] == source['source_function_id'])['calls']
         if c['block_id'] in {old for old, new in scoped.items() if new in reached}}
     relevant_calls = set(chain) | local_calls

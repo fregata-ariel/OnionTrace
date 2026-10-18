@@ -40,7 +40,7 @@ class ModelNativeTests(unittest.TestCase):
 
     def ref(self, category, name='process'):
         w = self.workspace
-        names = {f['id']: f['name'] for raw in (v['raw'] for v in w['functions'].values()) for f in raw['functions']}
+        names = {f['id']: f['name'] for raw in w['extractions'].values() for f in raw['functions']}
         return next(r for r in w['references'] if r['category'] == category and
             names[w['functions'][r['function_id']]['source_function_id']] == name)
 
@@ -99,8 +99,8 @@ class ModelNativeTests(unittest.TestCase):
         extraction = extract_manifest(manifest, tool, self.out / 'queues-extraction')
         w = connect(manifest, extraction, 'nr-softmodem')
         self.assertTrue(validate_structure(w['structure']))
-        self.assertTrue(any(r['resolution'] == 'unresolved' and r['source'] is None
-                            for r in w['structure']['relations'] if r['kind'] == 'dequeues'))
+        self.assertTrue(any(r['resolution'] == 'unresolved' and r['target'] is None
+                            for r in w['structure']['relations'] if r['kind'] == 'submits'))
         self.assertTrue(w['sources']['queues']['graphs'][0]['relations'])
 
 

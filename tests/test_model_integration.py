@@ -40,7 +40,8 @@ def workspace():
     ref = _seal('function_reference', {'origin_id': role, 'function_id': fid,
         'relation_ids': [start['id']], 'category': 'thread_start', 'source_record': {'call_path': []}})
     return _seal('execution_workspace', {'structure': structure, 'build_id': comp['identity']['build_id'],
-        'target': 'fixture', 'functions': {fid: {'raw': raw, 'source_function_id': function['id']}},
+        'target': 'fixture', 'functions': {fid: {'compilation_id': 'raw', 'source_function_id': function['id']}},
+        'extractions': {'raw': raw},
         'references': [ref], 'incompleteness': [], 'frontiers': [],
         'sources': {'threads': {'graphs': [{'relations': []}]}}})
 
@@ -170,6 +171,31 @@ class RegionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'invalid|changed'):
             open_region(dict(self.workspace, target='other'), self.ref['id'], sites())
 
+    def test_unresolved_local_call_and_relevant_frontier_block_uniqueness(self):
+        w = copy.deepcopy(self.workspace)
+        raw = w['extractions']['raw']
+        raw['functions'][0]['calls'] = [{'id': 'raw/call', 'caller_id': 'raw/process',
+            'target_id': None, 'block_id': 'left', 'resolution': 'unresolved', 'reason': 'unknown target'}]
+        w['sources']['threads']['graphs'][0]['relations'] = [
+            {'kind': 'calls', 'id': 'raw/call', 'resolution': 'unresolved', 'reason': 'unknown target'}]
+        w['frontiers'] = [{'call_id': 'raw/call', 'call_path': ['raw/call'], 'reason': 'unknown target'}]
+        w = reseal(w)
+        region = open_region(w, self.ref['id'], sites())
+        plan = initial_plan(region, ['work.begin', 'work.end', 'left'])
+        result = reconstruct_region(region, plan, trace(region, plan, ['work.begin', 'left', 'work.end']))
+        self.assertEqual(result['analysis']['status'], 'incomplete')
+        self.assertTrue(any(c.get('call_id') == 'raw/call' for c in region['constraints']))
+
+    def test_unrelated_frontier_does_not_poison_selected_interval(self):
+        w = copy.deepcopy(self.workspace)
+        w['frontiers'] = [{'call_id': 'unrelated', 'call_path': ['unrelated'], 'reason': 'unknown target'}]
+        w = reseal(w)
+        region = open_region(w, self.ref['id'], sites())
+        plan = initial_plan(region, ['work.begin', 'work.end', 'left'])
+        result = reconstruct_region(region, plan, trace(region, plan, ['work.begin', 'left', 'work.end']))
+        self.assertEqual(result['analysis']['status'], 'unique')
+        self.assertTrue(w['frontiers'])
+
     def test_references_are_detached_and_serializable(self):
         restored = json.loads(json.dumps(self.workspace))
         refs = references_from(restored, self.ref['origin_id'])
@@ -180,7 +206,7 @@ class RegionTests(unittest.TestCase):
     def test_escape_and_cycle_remain_incomplete(self):
         for edge in ({'source': 'left', 'target': 'exit'}, {'source': 'left', 'target': 'left'}):
             w = copy.deepcopy(self.workspace)
-            raw = next(iter(w['functions'].values()))['raw']
+            raw = w['extractions']['raw']
             raw['functions'][0]['edges'].append(edge)
             w = reseal(w)
             region = open_region(w, self.ref['id'], sites())
