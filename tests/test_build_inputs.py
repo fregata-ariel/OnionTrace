@@ -1,4 +1,5 @@
 """Real CMake File API/compile DB regressions; no external OAI checkout."""
+import copy
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,7 @@ import unittest
 from unittest.mock import patch
 
 from onion.build_inputs import collect, dependency_inventory, git_provenance, query, validation_args
+from onion.build_inputs import cmake_model, ownership_index, owner_for, command, absolute
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -83,6 +85,23 @@ class BuildInputTests(unittest.TestCase):
         for sources in ([], ['missing.c'], [ROOT / 'fixture/compilation/main.c']):
             with self.subTest(sources=sources), self.assertRaisesRegex(ValueError, 'analysis sources'):
                 collect(self.build, ['nr-softmodem'], sources=sources)
+
+    def test_indexed_ownership_rejects_ambiguous_source_membership_and_prefixes(self):
+        _, model, _, targets, _, _ = cmake_model(self.build)
+        row = json.loads(self.db_path.read_text())[0]
+        args, directory = command(row), Path(row['directory'])
+        source = absolute(row['file'], directory)
+        target, item = owner_for(row, args, directory, source, model, self.build, targets,
+                                 index=ownership_index(model, self.build, targets))
+        for kind in ('source', 'prefix'):
+            broken = copy.deepcopy(targets)
+            if kind == 'source':
+                broken[target['id']]['sources'].append(copy.deepcopy(item))
+            else:
+                broken['duplicate-prefix'] = copy.deepcopy(target)
+            with self.subTest(kind=kind), self.assertRaisesRegex(ValueError, 'one CMake target'):
+                owner_for(row, args, directory, source, model, self.build, broken,
+                          index=ownership_index(model, self.build, broken))
 
     def test_generated_and_system_headers_are_hashed(self):
         row = next(r for r in self.capture()["entries"] if r["source"].endswith("shared.c"))

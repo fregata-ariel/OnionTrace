@@ -139,19 +139,35 @@ def output_path(entry, args, directory):
     return absolute(args[positions[0] + 1], directory)
 
 
-def owner_for(entry, args, directory, source, model, build, targets):
-    output = output_path(entry, args, directory)
-    owners = []
+def ownership_index(model, build, targets):
+    """Resolve File API ownership once, rather than scanning large ASN.1 TUs.
+
+    Lists preserve ambiguous prefixes/source memberships so the same invalid
+    compile DB records are rejected by the indexed and direct lookup paths.
+    """
+    index = {}
     for target in targets.values():
-        # File API is the authority for both target build directory and source
-        # membership. The object output disambiguates shared sources/variants.
-        prefix = build / target["paths"]["build"] / "CMakeFiles" / (target["name"] + ".dir")
-        if not output.is_relative_to(prefix.resolve()):
-            continue
-        matching = [s for s in target.get("sources", []) if "compileGroupIndex" in s
-                    and absolute(s["path"], Path(model["paths"]["source"])) == source]
-        if len(matching) == 1:
-            owners.append((target, matching[0]))
+        prefix = (build / target['paths']['build'] / 'CMakeFiles' / (target['name'] + '.dir')).resolve()
+        sources = {}
+        for item in target.get('sources', []):
+            if 'compileGroupIndex' in item:
+                path = absolute(item['path'], Path(model['paths']['source']))
+                sources.setdefault(path, []).append(item)
+        index.setdefault(prefix, []).append((target, sources))
+    return index
+
+
+def owner_for(entry, args, directory, source, model, build, targets, *, index=None):
+    output = output_path(entry, args, directory)
+    index = ownership_index(model, build, targets) if index is None else index
+    owners = []
+    # File API remains the authority. The resolved object-output prefix and
+    # exact source membership disambiguate target variants without basename joins.
+    for prefix in (output, *output.parents):
+        for target, sources in index.get(prefix, []):
+            matching = sources.get(source, [])
+            if len(matching) == 1:
+                owners.append((target, matching[0]))
     if len(owners) != 1:
         raise ValueError("compile DB output/source cannot be matched to one CMake target")
     return owners[0]
@@ -312,6 +328,7 @@ def collect(build, names, *, configuration=None, oai=False, dependency_lock=None
         packages = {"format": "dpkg-query name/version/architecture", "listing": listing,
                     "sha256": "sha256:" + sha256(listing.encode()).hexdigest()}
     members = selection(targets, names)
+    ownership = ownership_index(model, build, targets)
     environment = {key: os.environ.get(key) for key in ENVIRONMENT}
     context = {"source": source_info, "cmake": index["cmake"], "configuration": config["name"],
                "environment": environment, "platform": platform.platform(), "inputs": provenance,
@@ -329,7 +346,7 @@ def collect(build, names, *, configuration=None, oai=False, dependency_lock=None
             args = command(entry)
             directory = Path(entry["directory"]).resolve()
             path = absolute(entry["file"], directory)
-            target, target_source = owner_for(entry, args, directory, path, model, build, targets)
+            target, target_source = owner_for(entry, args, directory, path, model, build, targets, index=ownership)
             matched.add((target["id"], target_source["path"]))
             group = target["compileGroups"][target_source["compileGroupIndex"]]
             row.update(source=str(path), directory=str(directory), arguments=args,

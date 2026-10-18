@@ -89,6 +89,8 @@ JSON、cwd、ソース所属またはターゲットが不整合なら成功扱�
 エントリはcompile DBの順序・原文・引数配列・cwdを保持する。同一ソースが複数ターゲット・
 複数条件でコンパイルされる場合もまとめない。出力オブジェクトのターゲットディレクトリと
 File APIのソース所属・compileGroupIndexを照合する。File APIの対象TUがcompile DBに無い場合も失敗。
+大きなASN.1 targetでも各エントリから全ソースを再走査しないよう、解決済みのobject出力prefixと
+source所属を一度だけ索引化する。重複prefix・重複source所属は複数候補のまま保持し、曖昧な所有を確定しない。
 不明な出力形式、compiler launcher、response file、プラグイン、C/C++以外の言語は黙って通さない。
 現実装の対応範囲はLinuxのCMake Makefiles/Ninjaが出力する`CMakeFiles/<target>.dir`形式。
 別形式・unity build等で照合できない場合は失敗理由を出力する。
