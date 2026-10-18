@@ -100,6 +100,20 @@ def export_viewer(workspaces, destination, session=None):
     return _export_views([project_workspace(w) for w in workspaces], destination, session)
 
 
+def _focus_view(view, function_names):
+    """Keep full structure; scope offline CFG bodies and refs explicitly."""
+    names = set(function_names) | {'main'}
+    cfgs = {key: cfg for key, cfg in view['cfgs'].items() if cfg['function'] in names}
+    return {**view, 'cfgs': cfgs,
+            'references': [r for r in view['references'] if r['function_id'] in cfgs],
+            'display_scope': {'kind': 'audited_function_cfg_subset',
+                'function_names': sorted(names), 'displayed_functions': len(cfgs),
+                'extracted_functions': len(view['cfgs']),
+                'scope': 'HTML contains audited function CFGs; all functions remain in workspace/native JSON',
+                'excluded_functions': [{'function_id': key, 'function': cfg['function']}
+                                       for key, cfg in view['cfgs'].items() if key not in cfgs]}}
+
+
 def _export_views(views, destination, session=None):
     """Serialize projections already validated in the current operation."""
     data = copy.deepcopy(session) if session is not None else {

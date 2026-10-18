@@ -59,11 +59,33 @@ def _load(manifest, extraction):
     return rows, failures
 
 
-def _resolve(functions, definitions, compilation, usr, linkage, signature, local=None):
+def _zero_parameter_peer(signature):
+    """Narrow C compatibility: zero-argument prototype vs no-prototype spelling."""
+    if not isinstance(signature, str):
+        return None
+    for suffix, peer in [(' (void)', ' ()'), (' ()', ' (void)')]:
+        if signature.endswith(suffix):
+            result = signature[:-len(suffix)]
+            if result and '(' not in result and ')' not in result:
+                return result + peer
+    return None
+
+
+def _resolve(functions, definitions, compilation, usr, linkage, signature, local=None, *, argument_count=None):
     if local is not None and linkage != 'external':
         candidates = [local] if local in functions else []
     elif usr:
         candidates = definitions.get((usr, linkage, signature, None if linkage == 'external' else compilation), [])
+        peer = _zero_parameter_peer(signature)
+        if peer and argument_count == 0:
+            candidates = list(candidates) + [key for key in definitions.get(
+                (usr, linkage, peer, None if linkage == 'external' else compilation), [])
+                if functions[key]['parameter_count'] == 0 and
+                not any(u['kind'] == 'cxx_semantics_not_complete' for u in functions[key]['uncertainties'])]
+        if argument_count not in (None, 0):
+            candidates = [key for key in candidates if not (
+                functions[key]['parameter_count'] == 0 and
+                _zero_parameter_peer(functions[key]['canonical_type']))]
     else:
         candidates = []
     if len(candidates) == 1:
@@ -157,7 +179,7 @@ def build_threads(manifest, extraction, targets=None, *, max_contexts=10000, max
                 calls[call['id']] = call
                 resolved, candidates, reason = _resolve(
                     functions, definitions, function['_compilation_id'], call['callee_usr'], call['callee_linkage'],
-                    call.get('callee_canonical_type'), call['target_id'])
+                    call.get('callee_canonical_type'), call['target_id'], argument_count=len(call['arguments']))
                 if call['kind'] != 'direct':
                     resolved, candidates, reason = None, [], 'indirect call; points-to analysis not performed'
                 api = APIS.get(call.get('thread_api')) if call['callee_linkage'] == 'external' else None
@@ -174,6 +196,9 @@ def build_threads(manifest, extraction, targets=None, *, max_contexts=10000, max
                             'resolution': 'resolved' if resolved else 'unresolved', 'candidates': candidates,
                             'reason': reason, 'range': call['range'], 'conditions': call['conditions'],
                             'api': call['callee_name'] if api else None, 'blocked': blocked}
+                if (resolved and len(call['arguments']) == 0 and
+                        _zero_parameter_peer(call.get('callee_canonical_type')) == functions[resolved]['canonical_type']):
+                    relation['signature_compatibility'] = 'C zero-parameter prototype/no-prototype; zero actual arguments'
                 relations[call['id']] = relation
                 graph['relations'].append(relation)
         pending = [(mains[0], [], [], [], [])]

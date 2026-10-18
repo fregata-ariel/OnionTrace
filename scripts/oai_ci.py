@@ -147,11 +147,12 @@ def run_acceptance(out, tool, *, jobs=2, capture_only=False):
     return result
 
 
-def resume_acceptance(out):
+def resume_acceptance(out, *, require_browser=False):
     """Resume in the same workspace after native evidence has been uploaded."""
     out = Path(out).resolve()
     result = json.loads((out / 'run.json').read_text())
-    result.update(passed=False, full_extraction_verified=False)
+    result.update(passed=False, full_extraction_verified=False,
+                  semantic_acceptance_verified=False, browser_verified=False)
     row = {'name': 'acceptance', 'passed': False}
     result['stages'].append(row)
     write(out / 'run.json', result)
@@ -174,7 +175,10 @@ def resume_acceptance(out):
         if not acceptance['passed']:
             raise ValueError('OAI acceptance failed; see acceptance/failures.json')
         row['passed'] = True
-        result.update(passed=True, full_extraction_verified=True, pending_stages=[])
+        result.update(passed=not require_browser, full_extraction_verified=not require_browser,
+                      semantic_acceptance_verified=True, pending_stages=['browser'] if require_browser else [])
+        if require_browser:
+            result['stages'].append({'name': 'browser', 'passed': False, 'failure': 'browser verification pending'})
         result.pop('failure', None)
     except Exception as error:
         row['failure'] = result['failure'] = str(error) or type(error).__name__
@@ -195,11 +199,15 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--capture-only', action='store_true', help='stop before acceptance; does not mark the run passed')
     mode.add_argument('--resume-acceptance', action='store_true', help='verify unchanged native evidence and finish acceptance')
+    parser.add_argument('--require-browser', action='store_true', help='keep the resumed run pending until the browser gate completes')
     args = parser.parse_args()
     if args.jobs < 1:
         parser.error('--jobs must be positive')
     if args.resume_acceptance:
-        return 0 if resume_acceptance(args.out)['passed'] else 1
+        result = resume_acceptance(args.out, require_browser=args.require_browser)
+        return 0 if result['passed'] or (args.require_browser and result.get('semantic_acceptance_verified')) else 1
+    if args.require_browser:
+        parser.error('--require-browser requires --resume-acceptance')
     if args.tool is None:
         parser.error('--tool is required for build/capture/extraction')
     result = run_acceptance(args.out, args.tool, jobs=args.jobs, capture_only=args.capture_only)

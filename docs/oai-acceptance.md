@@ -42,11 +42,27 @@ Ubuntu 24.04の使い捨てrunner、Python 3.12、Clang/LLVM 18、CMake/Ninjaを
    6候補接続を固定byte位置・hashから再計算する。contract文は別途source hashで確認する。
    同一workspace内で直前に検証したthread/callback graphを共有し、重複探索を避ける。
 
+OAIのHTMLと`view.json`のCFG本文は、固定thread経路のcaller/start、callback/Queue監査地点の
+関数とcallback候補関数に限定する。全構造の関係は残し、表示対象外の関数を未解決とは表示しない。
+`display_scope`に関数名・表示数・全抽出数・対象外の関数IDを記録する。全関数のCFGと文脈は
+`workspace.json`とnative抽出に保持する。全関数のCFGを両targetの単一HTMLへ埋め込むと約754MBに
+なり、JavaScript処理系の単一文字列上限を超えるため、監査対象の表示と完全な保存形式を分ける。
+埋込みデータは`application/json`から`JSON.parse`で読み込み、大きなJavaScriptリテラルの
+コンパイルを避ける。`void(void)`と古いCの`void()`の互換性は、実引数・定義の引数がともに0件の
+直接呼出しだけで扱い、成立根拠をcall relationに記録する。余分な実引数や複数定義を確定しない。
+
 CIは`--capture-only`でnative抽出まで実行して`oai-native-*` Artifactを先に保存し、
 別stepの`--resume-acceptance`で総合gateを実行する。前半だけでは`run.json.passed`はfalseのまま。
 再開時にOnionTrace commit、manifest、抽出一覧、両実行ファイルのhashを照合し、各nativeファイルも
 モデル構築時に再検証する。再構成stepは20分・仮想メモリ6GiBを上限とし、runner停止前に失敗を
 診断できるようにする。native Artifactは総合受入の代わりにはならない。
+CIでは`--resume-acceptance --require-browser`で意味解析の合格後も全体をpendingに保つ。
+続くChromium検証が実OAI HTMLを開き、両mainから開始関数・Queue参照・実CFGへ移動し、
+実行観測への誤表示や外部通信が無いことを確認する。script error・表示上限で選択経路へ進めない場合も失敗。
+完了通知の取得側`wait_free_rx_tti`も開き、Node/Chromiumの版、結果JSONと5枚の画面を
+`browser/`へ保存する。大きな枝は16接続ずつ前後へ移動でき、240要素の描画上限で後半の接続を隠さない。
+consumer関数から入力Queueへも取得方向を示して移動できる。ここまで成功した場合だけ
+`run.json.passed`と`browser_verified`をtrueにする。通常CIは引き続きOAIを取得しない。
 大きなJSONの書出し・canonical hash・ファイルhashは逐次処理し、読込みでは同じpath/ID文字列を共有する。
 I/Oの変更はcanonical IDとJSONの値を変えない。OAIのworkspace/structure/viewは空白を省いた
 JSONで保存する。同期子参照は親参照IDとcall pathで文脈を保持し、親の本文を再帰コピーしない。
@@ -92,8 +108,9 @@ OAI/ASN.1/SIMDeの版と実内容は固定するが、OSパッケージ一覧は
 | `inputs/{targets,excluded,failures}.json` | 対象／除外理由／入力検証失敗の全一覧 |
 | `extraction/` | 各TUのnative CFGと呼出し・抽出ログ・失敗一覧 |
 | `acceptance/acceptance.json`, `oai-*.json` | 全体成否と固定経路・地点の個別gate結果 |
-| `acceptance/<target>/{workspace,structure,view}.json` | 両main、thread、callback、Queue、未解決点、CFG参照 |
+| `acceptance/<target>/{workspace,structure,view}.json` | 全関数を含むworkspace、構造、監査対象CFGの表示projectionとdisplay_scope |
 | `acceptance/structure.html` | 自己完結の表示成果物。ダウンロード後offlineで開く |
+| `browser/{summary.json,*.png}` | 実OAI HTMLをChromiumで操作した結果とthread/Queue/完了通知取得の5画面 |
 
 失敗時も`!cancelled()`のArtifact uploadを実行する。取得・依存準備・buildの前で止まった場合、
 後段成果物が無い理由はrun.jsonまたはActionsのstepログで確認する。表示成果物が作れた場合も

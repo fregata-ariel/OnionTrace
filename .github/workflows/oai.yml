@@ -9,6 +9,7 @@ on:
       - '.github/workflows/oai.yml'
       - 'scripts/oai_ci.py'
       - 'scripts/install_oai_dependencies.py'
+      - 'scripts/check_oai_browser.cjs'
 
 permissions:
   contents: read
@@ -32,7 +33,7 @@ jobs:
       - name: Install build dependencies (no RF drivers)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang-18 libclang-18-dev llvm-18-dev libclang-rt-18-dev cmake ninja-build build-essential automake autoconf libtool pkg-config bison flex libblas-dev liblapack-dev liblapacke-dev libreadline-dev libconfig-dev libsctp-dev libssl-dev zlib1g-dev xxd libyaml-cpp-dev
+          sudo apt-get install -y --no-install-recommends clang-18 libclang-18-dev llvm-18-dev libclang-rt-18-dev cmake ninja-build build-essential automake autoconf libtool pkg-config bison flex libblas-dev liblapack-dev liblapacke-dev libreadline-dev libconfig-dev libsctp-dev libssl-dev zlib1g-dev xxd libyaml-cpp-dev fonts-noto-cjk
       - name: Build native extractor
         run: |
           cmake -S tools/libtooling -B build-libtooling -G Ninja -DLLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm -DClang_DIR=/usr/lib/llvm-18/lib/cmake/clang
@@ -59,7 +60,18 @@ jobs:
         timeout-minutes: 20
         run: |
           ulimit -v 6291456
-          python scripts/oai_ci.py --out out/oai --resume-acceptance
+          python scripts/oai_ci.py --out out/oai --resume-acceptance --require-browser
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install browser verification dependencies
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Open actual OAI HTML and follow main to thread and Queue CFGs
+        timeout-minutes: 8
+        run: node scripts/check_oai_browser.cjs out/oai
       - name: Publish acceptance summary
         if: ${{ !cancelled() }}
         run: |
@@ -88,6 +100,7 @@ jobs:
             out/oai/inputs/
             out/oai/extraction/
             out/oai/acceptance/
+            out/oai/browser/
             out/oai/workspace/preparation.json
             out/oai/workspace/source/cmake_targets/oniontrace-analysis/build/compile_commands.json
             out/oai/workspace/source/cmake_targets/oniontrace-analysis/build/CMakeCache.txt

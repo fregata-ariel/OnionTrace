@@ -6,10 +6,18 @@ import shutil
 
 from .integration import connect
 from .libtooling import write
-from .viewer import _export_views, project_workspace
+from .viewer import _export_views, project_workspace, _focus_view
 from .oai_threads import verify_paths, EXPECTATIONS as THREADS
 from .oai_callbacks import verify_extraction as verify_callbacks, EXPECTATIONS as CALLBACKS
 from .oai_queues import verify_extraction as verify_queues, EXPECTATIONS as QUEUES
+
+
+def _oai_display_names():
+    paths = json.loads(THREADS.read_text())['paths']
+    sites = json.loads(CALLBACKS.read_text())['sites'] + json.loads(QUEUES.read_text())['sites']
+    return ({p['start'] for p in paths} |
+            {s['caller'] for p in paths for s in p['calls']} |
+            {s['function'] for s in sites} | {s['callback_symbol'] for s in sites if s.get('callback_symbol')})
 
 
 def export_acceptance(manifest, extraction, out, *, oai=False):
@@ -56,6 +64,8 @@ def export_acceptance(manifest, extraction, out, *, oai=False):
                 write(out / target / 'workspace.json', workspace, compact=oai)
                 write(out / target / 'structure.json', workspace['structure'], compact=oai)
                 view = project_workspace(workspace)
+                if oai and manifest.get('profile') == 'oai':
+                    view = _focus_view(view, _oai_display_names())
                 write(out / target / 'view.json', view, compact=oai)
                 views.append(view)
                 categories = {r['category'] for r in view['references']}
@@ -72,6 +82,8 @@ def export_acceptance(manifest, extraction, out, *, oai=False):
                           'unresolved_links': sum(r['resolution'] != 'resolved' for r in view['links']),
                           'frontiers': len(view['frontiers']),
                           'incompleteness': workspace['incompleteness'], 'runtime_evidence': False}
+                if view.get('display_scope'):
+                    result['display_scope'] = view['display_scope']
                 summary['targets'].append(result)
                 return result
             gate(target, export_target)

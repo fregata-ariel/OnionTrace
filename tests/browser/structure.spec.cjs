@@ -47,6 +47,20 @@ test('callback targets and unresolved endpoints remain inspectable',async({page}
   await expect(page.locator('#structure-evidence')).toContainText('reason');
   await expect(page.locator('.node.observed,.node.inferred')).toHaveCount(0);
 });
+test('consumer functions expose their incoming Queue without a producer path',async({page})=>{
+  await page.goto(url('structure-only.html'));
+  await page.evaluate(()=>{
+    const v=DATA.execution_views[0];
+    v.entities.push({id:'consumer-only-queue',kind:'queue',label:'consumer-only Queue'});
+    v.links.unshift({...v.links[0],id:'consumer-only-dequeue',kind:'dequeues',
+      source:'consumer-only-queue',target:v.roots[0],resolution:'candidate'});
+  });
+  await page.getByRole('button',{name:'main を展開・折り畳み',exact:true}).click();
+  const queue=page.locator('#structure-tree .pick[data-entity="consumer-only-queue"]');
+  await expect(queue).toContainText('取得 ←');await queue.click();
+  await expect(page.locator('#structure-evidence')).toContainText('consumer-only-dequeue');
+  await expect(page.locator('.node.observed,.node.inferred')).toHaveCount(0);
+});
 test('collapse and target switches retain selected CFG, block, reference and runtime cursor',async({page})=>{
   await page.locator('#stages button').nth(2).click();
   await page.locator('#job').selectOption('1');
@@ -103,7 +117,7 @@ for(const selection of ['click','Enter','Space'])test(`large branches and CFGs r
   await page.goto(url('structure-only.html'));
   await page.evaluate(()=>{
     const v=DATA.execution_views[0],root=v.roots[0],sample=v.links[0];
-    for(let i=0;i<90;i++){
+    for(let i=0;i<330;i++){
       const id='large/function/'+i;
       v.entities.push({id,kind:'function',label:'extra '+i});
       v.links.push({...sample,id:'large/link/'+i,source:root,target:id});
@@ -117,7 +131,7 @@ for(const selection of ['click','Enter','Space'])test(`large branches and CFGs r
   });
   await page.getByRole('button',{name:'main を展開・折り畳み',exact:true}).click();
   expect(await page.locator('#structure-tree .pick').count()).toBeLessThanOrEqual(17);
-  const more=page.getByRole('button',{name:/^さらに表示/});
+  const more=page.getByRole('button',{name:/^次の接続/});
   await expect(more).toBeVisible();
   while(await more.count())await more.click();
   await expect(page.locator('#structure-tree')).toContainText('循環参照');

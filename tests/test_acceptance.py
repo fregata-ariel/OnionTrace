@@ -118,12 +118,25 @@ class AcceptanceTests(unittest.TestCase):
         self.assertFalse(result['passed'])
         self.assertFalse(result['full_extraction_verified'])
         self.assertTrue((destination / 'acceptance/oai-threads.json').exists())
+        record['semantic_acceptance_verified'] = True  # stale phase flag must not survive a failed resume
         (destination / 'run.json').write_text(json.dumps(record))
         extraction.write_text('{}')
         with patch('scripts.oai_ci.export_acceptance') as accept:
             result = resume_acceptance(destination)
         accept.assert_not_called()
         self.assertIn('captured input or binary changed', result['failure'])
+        self.assertFalse(result['semantic_acceptance_verified'])
+        # Phase orchestration must stay pending even after a semantic pass if
+        # Chromium has not run. The actual native OAI gate above remains false.
+        extraction.write_text(json.dumps(self.extraction))
+        (destination / 'run.json').write_text(json.dumps(record))
+        with patch('scripts.oai_ci.export_acceptance', return_value={'passed': True}):
+            result = resume_acceptance(destination, require_browser=True)
+        self.assertTrue(result['semantic_acceptance_verified'])
+        self.assertFalse(result['passed'])
+        self.assertFalse(result['full_extraction_verified'])
+        self.assertEqual(result['pending_stages'], ['browser'])
+        self.assertFalse(result['stages'][-1]['passed'])
 
     def test_isolated_simde_layout_keeps_external_headers_out_of_oai_function_definitions(self):
         destination = self.out / 'isolated-simde'
