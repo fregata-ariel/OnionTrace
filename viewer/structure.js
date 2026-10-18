@@ -10,7 +10,7 @@ function entityLabel(view,id){const entity=view.entities.find(e=>e.id===id);retu
 function executionLinks(view,id){const entity=view.entities.find(e=>e.id===id);return view.links.filter(l=>l.source===id||(l.target===id&&(entity?.kind==='queue'||l.source===null||(entity?.kind==='function'&&l.kind==='dequeues'))));}
 function badge(resolution){return el('span',resolutionNames[resolution]||resolution,'evidence-badge '+resolution);}
 function selectExecution(id,link){const s=executionState();s.entity=id;s.link=link?.id||null;s.refLimit=16;renderExecution();}
-function openExecutionCFG(fid,reference=null){const s=executionState();s.reference=reference;if(s.cfg!==fid){s.cfg=fid;s.block=null;s.cfgLimit=60;}state.selected=s.block;renderExecution();$('graph-title').scrollIntoView?.({block:'start',behavior:'smooth'});}
+function openExecutionCFG(fid,reference=null){const s=executionState(),changed=s.cfg!==fid;s.reference=reference;if(changed){s.cfg=fid;s.block=null;s.cfgLimit=60;}state.selected=s.block;renderExecution();if(changed){const graph=$('graph'),entry=graph.querySelector('.node');if(entry){const box=entry.getBoundingClientRect(),area=graph.getBoundingClientRect();graph.scrollLeft+=box.left+box.width/2-area.left-graph.clientWidth/2;}}$('graph-title').scrollIntoView?.({block:'start',behavior:'smooth'});}
 function renderStructureTree(view,s){
  const container=$('structure-tree');container.replaceChildren();let count=0,limited=false;
  function branch(id,link,path,ancestors){

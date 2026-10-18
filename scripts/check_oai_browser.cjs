@@ -78,6 +78,12 @@ function inspectAndOpen({index,kind}) {
   const count=await page.evaluate(()=>DATA.execution_views.length);if(count!==2)throw Error('expected both OAI targets');
   for(let index=0;index<count;index++)for(const kind of (index===0?['thread','queue','completion']:['thread','queue'])){
    const row=await page.evaluate(inspectAndOpen,{index,kind});result.results.push(row);
+   await page.locator('#graph .node').first().scrollIntoViewIfNeeded();
+   await page.waitForFunction(()=>{
+    const area=document.getElementById('graph').getBoundingClientRect(),entry=document.querySelector('#graph .node').getBoundingClientRect();
+    return entry.left>=Math.max(area.left,0)-2&&entry.right<=Math.min(area.right,innerWidth)+2&&entry.top>=0&&entry.bottom<=innerHeight+2;
+   });
+   row.entry_visible=true;
    await page.screenshot({path:path.join(out,row.target+'-'+kind+'.png')});
   }
   if(errors.length||requests.length)throw Error('script error or external network dependency');

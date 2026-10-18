@@ -61,6 +61,20 @@ test('consumer functions expose their incoming Queue without a producer path',as
   await expect(page.locator('#structure-evidence')).toContainText('consumer-only-dequeue');
   await expect(page.locator('.node.observed,.node.inferred')).toHaveCount(0);
 });
+test('opening a wide CFG brings its entry into the graph viewport',async({page})=>{
+  await page.goto(url('structure-only.html'));
+  await page.evaluate(()=>{
+    const v=DATA.execution_views[0],cfg=v.cfgs[v.roots[0]];
+    cfg.nodes=Array.from({length:22},(_,i)=>({id:'wide/'+i,clang_id:'B'+i,entry:i===0,exit:i===21,sites:[],source_block:{elements:[]}}));
+    cfg.edges=cfg.nodes.slice(1,21).flatMap(n=>[{source:'wide/0',target:n.id},{source:n.id,target:'wide/21'}]);
+  });
+  await page.getByRole('button',{name:'CFGを開く: main',exact:true}).click();
+  const visible=await page.evaluate(()=>{
+    const area=document.getElementById('graph').getBoundingClientRect(),entry=document.querySelector('#graph .node').getBoundingClientRect();
+    return entry.left>=area.left-2&&entry.right<=area.right+2;
+  });
+  expect(visible).toBe(true);
+});
 test('collapse and target switches retain selected CFG, block, reference and runtime cursor',async({page})=>{
   await page.locator('#stages button').nth(2).click();
   await page.locator('#job').selectOption('1');
