@@ -37,9 +37,16 @@ def install(prefix, jobs):
                     env=dict(os.environ, CFLAGS='-O2 -fno-strict-aliasing'))
                 run(['make', '-j' + str(jobs)], source)
                 run(['make', 'install'], source)
+            elif row['name'] == 'simde':
+                # simde-no-tests has x86/ at its root. OAI includes
+                # <simde/x86/...>, matching build_helper's /usr/include/simde.
+                if not (source / 'x86/gfni.h').is_file():
+                    raise ValueError('SIMDe checkout lacks required gfni.h')
+                (destination / 'include').mkdir()
+                (destination / 'include/simde').symlink_to(source, target_is_directory=True)
             environment['ONION_' + row['name'].upper()] = str(destination)
     environment['PATH'] = str(prefix / 'asn1c/bin') + os.pathsep + os.environ['PATH']
-    environment['CPATH'] = os.pathsep.join(filter(None, [str(prefix / 'simde/source'), os.environ.get('CPATH')]))
+    environment['CPATH'] = os.pathsep.join(filter(None, [str(prefix / 'simde/include'), os.environ.get('CPATH')]))
     (prefix / 'environment.json').write_text(json.dumps(environment, indent=2) + '\n')
     if os.environ.get('GITHUB_ENV'):
         with Path(os.environ['GITHUB_ENV']).open('a') as stream:

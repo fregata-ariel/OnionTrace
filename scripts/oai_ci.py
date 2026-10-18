@@ -99,11 +99,18 @@ def run_acceptance(out, tool, *, jobs=2):
                 raise ValueError('input capture failed; see inputs/failures.json')
             return manifest
         manifest = stage('capture', capture)
-        extraction = stage('extract', lambda: extract_manifest(manifest, tool, out / 'extraction'))
-        # Export even partial extraction diagnostics, but never pass them.
-        acceptance = stage('acceptance', lambda: export_acceptance(manifest, extraction, out / 'acceptance', oai=True))
-        if not acceptance['passed']:
-            raise ValueError('OAI acceptance failed; see acceptance/failures.json')
+        def extract():
+            extraction = extract_manifest(manifest, tool, out / 'extraction')
+            if not extraction['ready']:
+                raise ValueError('OAI extraction failed; see extraction/failures.json')
+            return extraction
+        extraction = stage('extract', extract)
+        def accept():
+            acceptance = export_acceptance(manifest, extraction, out / 'acceptance', oai=True)
+            if not acceptance['passed']:
+                raise ValueError('OAI acceptance failed; see acceptance/failures.json')
+            return acceptance
+        stage('acceptance', accept)
         result.update(passed=True, full_extraction_verified=True)
     except Exception as error:
         result['failure'] = str(error)
