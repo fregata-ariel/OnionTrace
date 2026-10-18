@@ -17,7 +17,7 @@ manifestに記録する。CMake版・OS依存の更新は入力条件の変更�
 
 固定版の [build_oai](https://github.com/duranta-project/openairinterface5g/blob/7fa4d018d4178f9664ea1ca377eca2e822c7a979/cmake_targets/build_oai) と
 [build_helper](https://github.com/duranta-project/openairinterface5g/blob/7fa4d018d4178f9664ea1ca377eca2e822c7a979/cmake_targets/tools/build_helper)
-に従う。`--gNB --nrUE -w SIMU --ninja` を使い、両コンパイラ、
+に従う。`--gNB --nrUE -w SIMU --ninja --noavx512` を使い、両コンパイラ、
 `CMAKE_EXPORT_COMPILE_COMMANDS=ON`、`CMAKE_BUILD_TYPE=RelWithDebInfo` を明示する。
 compiler launcherを介さないよう`CCACHE_ACTIVE=OFF`とし、CPM_SOURCE_CACHEもworkspace内へ分離する。
 `--gNB`はnr-cuupも、SIMUと共通処理はrfsimulator等もビルドするが、解析対象は両softmodemの
@@ -101,6 +101,8 @@ OAIがCFLAGSへ含めるlink専用の`-rdynamic`だけは構文検査・抽出�
 `validation.removed_link_arguments`と抽出側の`adjustments.removed_link_arguments`へ記録する。
 元の引数・compile DB・hashは保持する。これ以外の意味を持つ引数や未知の引数は保持し、
 未知・未使用引数のerror昇格も維持する。`-fsyntax-only -MD`でsystem headerを含む依存を取得する。
+`-march=native`等がある場合は`validation.native_driver_jobs`にClang `-###`の実CPU・feature展開を
+保存する。同じ引数文字列でもhost条件が変わるとcache_keyが変わり、抽出時の再検証でも不一致を拒否する。
 同時にClangの`-MJ`で実際の主入力・cwd・driverを取得し、主入力が1件だけで、
 compile DBの`file`・実行cwd・記録したコンパイラと一致することを検査する。
 主入力そのものが依存一覧に含まれ、その内容のSHA-256を記録できた場合だけ`validated`とする。

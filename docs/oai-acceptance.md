@@ -24,9 +24,13 @@ Ubuntu 24.04の使い捨てrunner、Python 3.12、Clang/LLVM 18、CMake/Ninjaを
    実ファイルhashは記録するが、外部intrinsicsをOAIの関数定義として展開しない。
 3. `scripts/oai_ci.py`が**存在しない出力先**を作り、固定origin/tag/commitの新規checkoutを取得する。
    既存checkout・運用buildは再利用しない。
-4. 固定`build_oai`引数（gNB、nrUE、SIMU、Clang 18、RelWithDebInfo、ccache無効）で
+4. 固定`build_oai`引数（gNB、nrUE、SIMU、Clang 18、RelWithDebInfo、ccache無効、`--noavx512`）で
    configure/buildする。File API queryはconfigure前に置く。さらにCMake buildの終了値と
    両実行ファイルの存在・hashを確認する。build_oaiの成功メッセージだけでは合格させない。
+   固定版のLDPC encoderはAVX-512 VBMI経路でClang 18 backendがクラッシュしたため、
+   OAIの正式optionでAVX-512を無効にする。OAIソースは変更しない。
+   OAIが付ける`-march=native`は保持し、Clang `-###`の展開済みCPU/featureをmanifestに記録して
+   host差を入力条件の差として検出する。
 5. T2のOAI profileで両ターゲットの依存閉包と全compile DBを照合し、
    `config/oai-analysis-scope.json`の10翻訳単位について入力検証とT3を実行する。
    固定source auditの全Cソースを含み、ヘッダは実際の依存として検証する。

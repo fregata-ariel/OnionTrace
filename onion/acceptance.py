@@ -25,6 +25,9 @@ def export_acceptance(manifest, extraction, out, *, oai=False):
         if (out / target).exists():
             shutil.rmtree(out / target)
     (out / 'structure.html').unlink(missing_ok=True)
+    for name in ('acceptance', 'failures', 'nr-softmodem', 'nr-uesoftmodem', 'viewer',
+                 'oai-threads', 'oai-callbacks', 'oai-queues'):
+        (out / (name + '.json')).unlink(missing_ok=True)
     summary = {'schema_version': 1, 'kind': 'structure_acceptance', 'passed': False,
                'full_extraction_verified': False, 'runtime_evidence': False,
                'input_manifest_id': manifest.get('manifest_id'),

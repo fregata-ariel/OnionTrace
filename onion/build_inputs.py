@@ -238,8 +238,15 @@ def validate_entry(args, directory, compiler, source):
             raise ValueError("compiler primary input missing from dependency inventory")
         records = [file_record(path) for path in dependencies]
         main_input = next(row for row in records if row["path"] == str(source))
-        return records, completed.stderr, {"main_input": main_input, "compiler_path": str(actual_compiler),
-            "removed_link_arguments": [a for a in args[1:] if a in LINK_ONLY_ARGUMENTS]}
+        validation = {"main_input": main_input, "compiler_path": str(actual_compiler),
+                      "removed_link_arguments": [a for a in args[1:] if a in LINK_ONLY_ARGUMENTS]}
+        if any(a in ('-march=native', '-mcpu=native', '-mtune=native') for a in flags):
+            # The original string -march=native alone cannot identify a CPU.
+            # Clang expands it into cc1 target CPU/features without compiling.
+            # No temporary depfile/output arguments enter this stable record.
+            probe = run([compiler['path'], *flags, '-fsyntax-only', '-###'], directory)
+            validation['native_driver_jobs'] = probe.stderr
+        return records, completed.stderr, validation
 
 
 def git_provenance(source, lock):

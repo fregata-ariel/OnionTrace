@@ -101,6 +101,25 @@ class BuildInputTests(unittest.TestCase):
         self.assertNotEqual(before["manifest_id"], after["manifest_id"])
         self.assertNotEqual(before["entries"][0]["cache_key"], after["entries"][0]["cache_key"])
 
+    def test_native_cpu_expansion_is_recorded_and_invalidates_cache(self):
+        from onion.build_inputs import run as real_run
+        self.configure('-DCMAKE_C_FLAGS=-march=native -mno-avx512f')
+        before = self.capture()
+        self.assertTrue(before['ready'], before)
+        row = next(r for r in before['entries'] if r['status'] == 'validated')
+        self.assertIn('-target-cpu', row['validation']['native_driver_jobs'])
+        self.assertIn('-target-feature', row['validation']['native_driver_jobs'])
+        def changed_cpu(arguments, cwd=None):
+            result = real_run(arguments, cwd)
+            if '-###' in arguments:
+                result.stderr += '\nchanged native CPU feature set\n'
+            return result
+        with patch('onion.build_inputs.run', side_effect=changed_cpu):
+            after = self.capture()
+        self.assertTrue(after['ready'])
+        other = next(r for r in after['entries'] if r['status'] == 'validated')
+        self.assertNotEqual(row['cache_key'], other['cache_key'])
+
     def test_header_content_change_invalidates_cache(self):
         before = self.capture()
         header = self.build / "generated/config.h"

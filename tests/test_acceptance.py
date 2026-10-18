@@ -73,6 +73,7 @@ class AcceptanceTests(unittest.TestCase):
     def test_failed_or_missing_extraction_never_reuses_success(self):
         destination = self.out / 'failed'
         self.assertTrue(export_acceptance(self.manifest, self.extraction, destination)['passed'])
+        (destination / 'oai-queues.json').write_text('{"full_extraction_verified": true}')
         extraction = copy.deepcopy(self.extraction)
         extraction['entries'].pop()
         # Even a misleading ready flag cannot hide a missing selected TU.
@@ -83,6 +84,8 @@ class AcceptanceTests(unittest.TestCase):
         extraction['ready'] = False
         self.assertFalse(export_acceptance(self.manifest, extraction, destination)['passed'])
         self.assertFalse((destination / 'structure.html').exists())
+        self.assertFalse((destination / 'viewer.json').exists())
+        self.assertFalse((destination / 'oai-queues.json').exists())
 
     def test_input_condition_change_and_mismatched_artifacts_fail(self):
         manifest = copy.deepcopy(self.manifest)
