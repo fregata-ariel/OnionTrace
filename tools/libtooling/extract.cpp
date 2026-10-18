@@ -159,6 +159,74 @@ public:
     return P && P->getReturnType()->isVoidType() && P->getNumParams() == 1 &&
       P->getParamType(0)->isPointerType() && P->getParamType(0)->getPointeeType()->isVoidType();
   }
+  // T6 has its own expression domain: T5 intentionally erases address-of.
+  bool recordPointer(QualType T, llvm::StringRef Tag) {
+    T = T.getCanonicalType();
+    if (!T->isPointerType()) return false;
+    const auto *R = T->getPointeeType()->getAs<RecordType>();
+    return R && R->getDecl()->getName() == Tag;
+  }
+  j::Value queueApi(const FunctionDecl *F) {
+    if (!F || isa<CXXMethodDecl>(F) || F->getNumParams() == 0) return nullptr;
+    auto N = F->getNameAsString();
+    auto Q = [&](unsigned I) { return recordPointer(F->getParamDecl(I)->getType(), "notifiedFIFO_s"); };
+    auto E = [&](unsigned I) { return recordPointer(F->getParamDecl(I)->getType(), "notifiedFIFO_elt_s"); };
+    if (N == "newNotifiedFIFO_elt" && F->getNumParams() == 4 && Q(2) &&
+        F->getParamDecl(0)->getType()->isIntegerType() && F->getParamDecl(1)->getType()->isIntegerType() &&
+        callbackType(F->getParamDecl(3)->getType()) && recordPointer(F->getReturnType(), "notifiedFIFO_elt_s")) return "create";
+    if (N == "pushNotifiedFIFO" && F->getNumParams() == 2 && Q(0) && E(1) && F->getReturnType()->isVoidType()) return "enqueue";
+    if ((N == "pullNotifiedFIFO" || N == "pollNotifiedFIFO") && F->getNumParams() == 1 && Q(0) &&
+        recordPointer(F->getReturnType(), "notifiedFIFO_elt_s")) return N == "pullNotifiedFIFO" ? "dequeue" : "poll";
+    if ((N == "initNotifiedFIFO" || N == "abortNotifiedFIFO") && F->getNumParams() == 1 && Q(0) && F->getReturnType()->isVoidType())
+      return N == "initNotifiedFIFO" ? "initialize" : "abort";
+    if (N == "delNotifiedFIFO_elt" && F->getNumParams() == 1 && E(0) && F->getReturnType()->isVoidType()) return "destroy";
+    return nullptr;
+  }
+  j::Object queueValue(const Expr *Input, const FunctionDecl *Owner, unsigned Depth = 0) {
+    const Expr *A = Input->IgnoreParenImpCasts();
+    auto V = statement(A);
+    V["shape"] = "opaque";
+    V["pointer"] = A->getType()->isPointerType();
+    if (Depth > 16) { V["reason"] = "expression depth limit"; return V; }
+    if (Input->getType()->isPointerType() && Input->isNullPointerConstant(Ctx, Expr::NPC_ValueDependentIsNotNull)) {
+      V["shape"] = "null"; return V;
+    }
+    if (const auto *R = dyn_cast<DeclRefExpr>(A)) {
+      if (const auto *D = dyn_cast<VarDecl>(R->getDecl())) {
+        V["shape"] = "storage"; V["usr"] = usr(D);
+        V["scope"] = D->getFormalLinkage() == Linkage::External ? "external" : Compilation.getValue();
+        if (const auto *P = dyn_cast<ParmVarDecl>(D))
+          for (unsigned I = 0; I < Owner->getNumParams(); ++I)
+            if (Owner->getParamDecl(I) == P) V["parameter_index"] = I;
+      }
+    } else if (const auto *M = dyn_cast<MemberExpr>(A)) {
+      V["shape"] = "member"; V["field_usr"] = usr(M->getMemberDecl());
+      V["field_name"] = M->getMemberDecl()->getNameAsString(); V["arrow"] = M->isArrow();
+      V["base"] = queueValue(M->getBase(), Owner, Depth + 1);
+    } else if (const auto *U = dyn_cast<UnaryOperator>(A)) {
+      if (U->getOpcode() == UO_AddrOf || U->getOpcode() == UO_Deref) {
+        V["shape"] = U->getOpcode() == UO_AddrOf ? "address" : "deref";
+        V["base"] = queueValue(U->getSubExpr(), Owner, Depth + 1);
+      }
+    } else if (const auto *S = dyn_cast<ArraySubscriptExpr>(A)) {
+      V["shape"] = "index"; V["base"] = queueValue(S->getBase(), Owner, Depth + 1);
+      V["index"] = queueValue(S->getIdx(), Owner, Depth + 1);
+    } else if (const auto *I = dyn_cast<IntegerLiteral>(A)) {
+      V["shape"] = "integer"; V["literal"] = pretty(I);
+    } else if (const auto *C = dyn_cast<CastExpr>(A)) {
+      // Keep casts explicit, including the pthread void* handoff; no alias proof.
+      V["shape"] = "cast"; V["base"] = queueValue(C->getSubExpr(), Owner, Depth + 1);
+    } else if (const auto *C = dyn_cast<CallExpr>(A)) {
+      V["shape"] = "call"; V["queue_api"] = queueApi(C->getDirectCallee());
+      j::Array Args;
+      for (const auto *Arg : C->arguments()) Args.push_back(queueValue(Arg, Owner, Depth + 1));
+      V["arguments"] = std::move(Args);
+    } else if (const auto *C = dyn_cast<ConditionalOperator>(A)) {
+      V["shape"] = "alternatives";
+      V["choices"] = j::Array{queueValue(C->getTrueExpr(), Owner, Depth + 1), queueValue(C->getFalseExpr(), Owner, Depth + 1)};
+    }
+    return V;
+  }
   j::Value callbackField(const ValueDecl *F) {
     if (!isa<FieldDecl>(F) || !callbackType(F->getType())) return nullptr;
     if (F->getName() == "processingFunc") return "actor";
@@ -350,10 +418,23 @@ public:
       bool VisitVarDecl(VarDecl *V) {
         if (V->hasInit()) write(j::Object{{"value_kind", "variable"}, {"variable_usr", E.usr(V)}},
                                V->getInit(), V->getInit(), V->getSourceRange());
+        if (V->hasInit()) {
+          auto &W = *Writes.back().getAsObject();
+          W["queue_target"] = j::Object{{"shape", "storage"}, {"usr", E.usr(V)},
+            {"scope", V->getFormalLinkage() == Linkage::External ? "external" : Compilation.getValue()},
+            {"pointer", V->getType()->isPointerType()}};
+          W["queue_value"] = E.queueValue(V->getInit(), Function);
+        }
         return true;
       }
       bool VisitBinaryOperator(BinaryOperator *B) {
         if (B->isAssignmentOp()) write(E.value(B->getLHS(), Function), B->getRHS(), B, B->getSourceRange());
+        if (B->isAssignmentOp()) {
+          auto &W = *Writes.back().getAsObject();
+          W["queue_target"] = E.queueValue(B->getLHS(), Function);
+          W["queue_value"] = B->getOpcode() == BO_Assign ? E.queueValue(B->getRHS(), Function) :
+            j::Object{{"shape", "opaque"}, {"reason", "compound assignment"}};
+        }
         return true;
       }
       bool VisitUnaryOperator(UnaryOperator *U) {
@@ -362,6 +443,17 @@ public:
           auto Kind = Target.getString("value_kind");
           if (Kind == "variable" || Kind == "parameter" || Kind == "member")
             write(std::move(Target), U, U, U->getSourceRange(), true);
+          if (Kind == "variable" || Kind == "parameter" || Kind == "member") {
+            auto &W = *Writes.back().getAsObject();
+            W["queue_target"] = E.queueValue(U->getSubExpr(), Function);
+            W["queue_value"] = j::Object{{"shape", "opaque"}, {"reason", "address escape"}};
+          }
+        }
+        if (U->isIncrementDecrementOp()) {
+          write(E.value(U->getSubExpr(), Function), U, U, U->getSourceRange());
+          auto &W = *Writes.back().getAsObject();
+          W["queue_target"] = E.queueValue(U->getSubExpr(), Function);
+          W["queue_value"] = j::Object{{"shape", "opaque"}, {"reason", "increment/decrement"}};
         }
         return true;
       }
@@ -384,7 +476,9 @@ public:
         const FunctionDecl *Definition = Callee ? Callee->getDefinition() : nullptr;
         bool Local = Definition && !E.SM.isInSystemHeader(Definition->getLocation());
         j::Array Arguments;
+        j::Array QueueArguments;
         for (const Expr *A : C->arguments()) Arguments.push_back(E.value(A, Function));
+        for (const Expr *A : C->arguments()) QueueArguments.push_back(E.queueValue(A, Function));
         auto P = Placement.find(C);
         Calls.push_back(j::Object{
           {"id", Owner + "/call/" + std::to_string(Calls.size())}, {"caller_id", Owner},
@@ -393,6 +487,8 @@ public:
           {"callee_expression", E.pretty(C->getCallee())}, {"arguments", std::move(Arguments)},
           {"callee_value", E.value(C->getCallee(), Function)},
           {"callback_api", E.callbackApi(Callee)},
+          {"queue_api", E.queueApi(Callee)}, {"queue_arguments", std::move(QueueArguments)},
+          {"queue_callee", E.queueValue(C->getCallee(), Function)},
           {"conditions", E.guards(C)},
           {"thread_api", E.threadApi(Callee)},
           {"callee_canonical_type", Callee ? j::Value(Callee->getType().getCanonicalType().getAsString(E.Policy)) : j::Value(nullptr)},
@@ -412,6 +508,7 @@ public:
                                   {"qualified_name", D->getQualifiedNameAsString()}, {"type", D->getType().getAsString(Policy)},
                                   {"canonical_type", D->getType().getCanonicalType().getAsString(Policy)},
                                   {"parameter_count", D->getNumParams()},
+                                  {"queue_semantics_version", 1},
                                   {"callback_writes", std::move(Writes)},
                                   {"linkage", linkage(D)}, {"range", range(D->getSourceRange())},
                                   {"blocks", std::move(Blocks)}, {"edges", std::move(Edges)},
