@@ -20,6 +20,8 @@ Ubuntu 24.04の使い捨てrunner、Python 3.12、Clang/LLVM 18、CMake/Ninjaを
 1. RFドライバを含まないOS依存を導入し、LibTooling抽出器をビルドする。
 2. `scripts/install_oai_dependencies.py`で`config/oai-2026.w07.json`のASN.1とSIMDeを
    commit指定で取得する。ソース・インストール先を専用prefixへ置き、版と実ファイルを記録する。
+   SIMDeはbuild_helperの`/usr/include/simde`と同じsystem-header区分で渡す。
+   実ファイルhashは記録するが、外部intrinsicsをOAIの関数定義として展開しない。
 3. `scripts/oai_ci.py`が**存在しない出力先**を作り、固定origin/tag/commitの新規checkoutを取得する。
    既存checkout・運用buildは再利用しない。
 4. 固定`build_oai`引数（gNB、nrUE、SIMU、Clang 18、RelWithDebInfo、ccache無効）で
@@ -48,7 +50,7 @@ Ubuntu 24.04へworkflowと同じOS依存を用意してから、リポジトリ�
 
 ```sh
 python scripts/install_oai_dependencies.py --prefix out/deps-001 --jobs 2
-# environment.jsonのPATH/CPATH/ONION_ASN1C/ONION_SIMDEを現shellへ適用
+# environment.jsonの各値を現shellへexportする
 cmake -S tools/libtooling -B build-libtooling -G Ninja \
   -DLLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm -DClang_DIR=/usr/lib/llvm-18/lib/cmake/clang
 cmake --build build-libtooling --parallel 2

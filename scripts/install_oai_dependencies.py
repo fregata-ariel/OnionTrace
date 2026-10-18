@@ -46,7 +46,10 @@ def install(prefix, jobs):
                 (destination / 'include/simde').symlink_to(source, target_is_directory=True)
             environment['ONION_' + row['name'].upper()] = str(destination)
     environment['PATH'] = str(prefix / 'asn1c/bin') + os.pathsep + os.environ['PATH']
-    environment['CPATH'] = os.pathsep.join(filter(None, [str(prefix / 'simde/include'), os.environ.get('CPATH')]))
+    # Match build_helper's system-header installation. CPATH is a user -I
+    # path and would ask LibTooling to emit thousands of third-party intrinsics.
+    for variable in ('C_INCLUDE_PATH', 'CPLUS_INCLUDE_PATH'):
+        environment[variable] = os.pathsep.join(filter(None, [str(prefix / 'simde/include'), os.environ.get(variable)]))
     (prefix / 'environment.json').write_text(json.dumps(environment, indent=2) + '\n')
     if os.environ.get('GITHUB_ENV'):
         with Path(os.environ['GITHUB_ENV']).open('a') as stream:
