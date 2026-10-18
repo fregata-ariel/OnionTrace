@@ -1,0 +1,79 @@
+name: OAI pinned acceptance
+
+on:
+  workflow_dispatch:
+  # Exercise changes to the acceptance runner itself before merging them.
+  # Ordinary source PRs continue to use the small, OAI-independent required CI.
+  pull_request:
+    paths:
+      - '.github/workflows/oai.yml'
+      - 'scripts/oai_ci.py'
+      - 'scripts/install_oai_dependencies.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oai-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  acceptance:
+    name: OAI 2026.w07 / SIMU / Clang 18
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Install build dependencies (no RF drivers)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-18 libclang-18-dev llvm-18-dev libclang-rt-18-dev cmake ninja-build build-essential automake autoconf libtool pkg-config bison flex libblas-dev liblapack-dev liblapacke-dev libreadline-dev libconfig-dev libsctp-dev libssl-dev zlib1g-dev xxd libyaml-cpp-dev
+      - name: Build native extractor
+        run: |
+          cmake -S tools/libtooling -B build-libtooling -G Ninja -DLLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm -DClang_DIR=/usr/lib/llvm-18/lib/cmake/clang
+          cmake --build build-libtooling --parallel 2
+      - name: Install locked ASN.1 and SIMDe sources in isolated prefix
+        run: python scripts/install_oai_dependencies.py --prefix out/oai-dependencies --jobs 2
+      - name: Build, capture, extract, and verify both softmodems
+        run: python scripts/oai_ci.py --out out/oai --tool build-libtooling/onion-extract --jobs 2
+      - name: Publish acceptance summary
+        if: ${{ !cancelled() }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          result = Path('out/oai/run.json')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              if result.exists():
+                  data = json.loads(result.read_text())
+                  summary.write('Pinned OAI acceptance: ' + ('PASS' if data['passed'] else 'FAIL') + '\n\n')
+                  summary.write('```json\n' + json.dumps(data, indent=2) + '\n```\n')
+              else:
+                  summary.write('FAIL: preparation did not reach the OAI runner. Inspect dependency/toolchain logs.\n')
+          PY
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: oai-2026-w07-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            out/oai/run.json
+            out/oai/failures.json
+            out/oai/*.log
+            out/oai/dependencies.json
+            out/oai/inputs/
+            out/oai/extraction/
+            out/oai/acceptance/
+            out/oai/workspace/preparation.json
+            out/oai/workspace/source/cmake_targets/oniontrace-analysis/build/compile_commands.json
+            out/oai/workspace/source/cmake_targets/oniontrace-analysis/build/CMakeCache.txt
+            out/oai/workspace/source/cmake_targets/oniontrace-analysis/build/.cmake/api/v1/reply/
+            out/oai-dependencies/*/install.log
+            out/oai-dependencies/environment.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14

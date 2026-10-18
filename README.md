@@ -93,7 +93,7 @@ OAIのソースやCFGダンプは同梱していません。
 
 M1/T2の[解析入力の準備とmanifest](docs/oai-build-inputs.md)では、固定版OAIを独立したcheckoutに
 取得し、SIMU・Clang 18の入力条件、生成ヘッダ、依存、対象・除外・失敗の由来を記録します。
-小規模CMake fixtureは通常CIに含みます。OAI本体の総合検証は後続Issue #11で扱います。
+小規模CMake fixtureは通常CIに含みます。OAI本体の総合検証は[T9の受入手順](docs/oai-acceptance.md)を参照してください。
 
 
 M1/T3の[LibTooling抽出器](docs/libtooling-extractor.md)は、T2のmanifestからコンパイル条件ごとに

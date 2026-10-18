@@ -21,6 +21,7 @@ from onion.callbacks import build_callbacks
 from onion.queues import build_queues
 from onion.integration import connect
 from onion.viewer import export_viewer
+from onion.acceptance import export_acceptance
 
 
 class Tee:
@@ -140,6 +141,9 @@ def main():
     (output / 'structure-viewer/manifest.json').write_text(json.dumps(viewer_manifest, indent=2) + '\n')
     export_viewer(viewer_workspaces, output / 'structure-demo.html', data)
     export_viewer(viewer_workspaces, output / 'structure-only.html')
+    acceptance = export_acceptance(viewer_manifest, viewer_extraction, output / 'acceptance')
+    if not acceptance['passed']:
+        raise RuntimeError('End-to-end structure acceptance failed; see acceptance/failures.json')
     suite = unittest.defaultTestLoader.discover(str(ROOT / 'tests'), pattern='test_*.py')
     with (output / 'tests.log').open('w') as log:
         result = unittest.TextTestRunner(stream=Tee(sys.stdout, log), verbosity=2).run(suite)

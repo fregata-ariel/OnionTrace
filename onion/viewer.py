@@ -101,7 +101,7 @@ def export_viewer(workspaces, destination, session=None):
         'schema_version': 1, 'stages': [], 'oai_cfg': [],
         'limits': ['ソース抽出の静的構造です。実行証跡・実行時間は含みません。',
                    '非同期接続は関数内CFGの辺へ追加しません。',
-                   '固定OAIの実ビルド総合検証はM1/T9で実施します。']}
+                   '抽出・検証の対象範囲と未解決点は付属のmanifest・受入結果で確認してください。']}
     data['execution_views'] = [project_workspace(w) for w in workspaces]
     if not data['execution_views']:
         raise ValueError('provide at least one workspace')
