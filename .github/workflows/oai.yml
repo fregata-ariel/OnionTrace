@@ -65,6 +65,7 @@ jobs:
             out/oai/failures.json
             out/oai/*.log
             out/oai/dependencies.json
+            out/oai/source-audits.json
             out/oai/inputs/
             out/oai/extraction/
             out/oai/acceptance/

@@ -55,6 +55,35 @@ class BuildInputTests(unittest.TestCase):
         self.assertTrue(any(r["source"].endswith("worker.c") for r in manifest["entries"]))
         self.assertEqual(self.capture(), manifest)
 
+    def test_explicit_source_subset_keeps_variants_and_records_unanalyzed_entries(self):
+        whole = self.capture()
+        subset = collect(self.build, ['nr-softmodem', 'nr-uesoftmodem'], sources=['variant.c'])
+        self.assertTrue(subset['ready'], subset)
+        self.assertEqual(subset['summary'], {'validated': 2, 'excluded': 5, 'failed': 0})
+        self.assertEqual(len(subset['entries']), len(whole['entries']))
+        rows = [r for r in subset['entries'] if r['status'] == 'validated']
+        self.assertEqual({r['target']['name'] for r in rows}, {'variant_a', 'variant_b'})
+        self.assertNotEqual(rows[0]['cache_key'], rows[1]['cache_key'])
+        self.assertNotEqual(rows[0]['cache_key'], next(r['cache_key'] for r in whole['entries']
+                                                     if r.get('target') == rows[0]['target']))
+        self.assertEqual(subset['context']['analysis_scope']['kind'], 'explicit_source_subset')
+        self.assertTrue(all('not analyzed' in r['reason'] for r in subset['entries']
+                            if r['status'] == 'excluded' and r['selected_by']))
+
+    def test_requested_source_outside_target_closure_or_missing_db_is_failure(self):
+        result = collect(self.build, ['nr-softmodem', 'nr-uesoftmodem'], sources=['unrelated.c'])
+        self.assertFalse(result['ready'])
+        self.assertTrue(any('requested analysis source absent' in r['reason'] for r in result['entries']))
+        self.mutate_db(lambda rows: rows.__setitem__(slice(None), [r for r in rows if not r['file'].endswith('variant.c')]))
+        result = collect(self.build, ['nr-softmodem', 'nr-uesoftmodem'], sources=['variant.c'])
+        self.assertFalse(result['ready'])
+        self.assertTrue(any('missing from compile DB' in r['reason'] for r in result['entries']))
+
+    def test_empty_or_outside_source_subset_is_rejected(self):
+        for sources in ([], ['missing.c'], [ROOT / 'fixture/compilation/main.c']):
+            with self.subTest(sources=sources), self.assertRaisesRegex(ValueError, 'analysis sources'):
+                collect(self.build, ['nr-softmodem'], sources=sources)
+
     def test_generated_and_system_headers_are_hashed(self):
         row = next(r for r in self.capture()["entries"] if r["source"].endswith("shared.c"))
         self.assertTrue(any(d["path"].endswith("generated/config.h") for d in row["dependencies"]))

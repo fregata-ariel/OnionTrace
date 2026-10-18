@@ -16,6 +16,9 @@ sys.path.insert(0, str(ROOT))
 from onion.build_inputs import LOCK, collect, git_provenance, query, file_record
 from onion.libtooling import extract_manifest, write
 from onion.acceptance import export_acceptance
+from onion.oai_threads import audit_sources as audit_threads, EXPECTATIONS as THREADS
+from onion.oai_callbacks import audit_sources as audit_callbacks, EXPECTATIONS as CALLBACKS
+from onion.oai_queues import audit_sources as audit_queues, EXPECTATIONS as QUEUES
 from scripts.prepare_oai import prepare
 
 
@@ -54,6 +57,12 @@ def run_acceptance(out, tool, *, jobs=2):
         stage('fetch', lambda: prepare(workspace, fetch_only=True))
         source = workspace / 'source'
         lock = result['lock']
+        def audit():
+            audits = {name: action(source, json.loads(path.read_text())) for name, action, path in
+                      [('threads', audit_threads, THREADS), ('callbacks', audit_callbacks, CALLBACKS),
+                       ('queues', audit_queues, QUEUES)]}
+            write(out / 'source-audits.json', audits)
+        stage('source-audit', audit)
         # Tools/dependencies are installed by the workflow from the locked
         # revisions; verify them again before consuming their installed trees.
         dependencies = []
@@ -87,10 +96,16 @@ def run_acceptance(out, tool, *, jobs=2):
         dependencies.append({'name': 'cpm-cache', 'version': 'actual downloaded CPM/cache contents', 'path': str(cache)})
         dependency_lock = out / 'dependencies.json'
         write(dependency_lock, dependencies)
+        scope_path = ROOT / 'config/oai-analysis-scope.json'
+        scope = json.loads(scope_path.read_text())
+        if scope['revision'] != lock['commit']:
+            raise ValueError('analysis scope revision differs from OAI lock')
+        result['analysis_scope'] = scope
+        result['scope_file'] = file_record(scope_path)
         # Capture and extraction must see exactly the same environment.
         os.environ['CPM_SOURCE_CACHE'] = str(cache)
         def capture():
-            manifest = collect(build, lock['targets'], oai=True, dependency_lock=dependency_lock)
+            manifest = collect(build, lock['targets'], oai=True, dependency_lock=dependency_lock, sources=scope['sources'])
             for name, value in [('manifest', manifest), ('targets', [e for e in manifest['entries'] if e['status'] == 'validated']),
                                 ('excluded', [e for e in manifest['entries'] if e['status'] == 'excluded']),
                                 ('failures', [e for e in manifest['entries'] if e['status'] == 'failed'])]:

@@ -276,10 +276,14 @@ def dependency_inventory(lock_path):
     return {"lock": file_record(lock_path), "dependencies": records}
 
 
-def collect(build, names, *, configuration=None, oai=False, dependency_lock=None):
+def collect(build, names, *, configuration=None, oai=False, dependency_lock=None, sources=None):
     build = Path(build).resolve()
     index, model, config, targets, provenance, cache = cmake_model(build, configuration)
     source = Path(model["paths"]["source"]).resolve()
+    requested = None if sources is None else {absolute(str(p), source) for p in sources}
+    if requested is not None:
+        if not requested or any(not p.is_file() or not p.is_relative_to(source) for p in requested):
+            raise ValueError("analysis sources must be a nonempty list of files inside the CMake source tree")
     lock = json.loads(LOCK.read_text())
     if oai and sorted(names) != sorted(lock["targets"]):
         raise ValueError("OAI profile requires the two locked targets")
@@ -302,8 +306,12 @@ def collect(build, names, *, configuration=None, oai=False, dependency_lock=None
                "environment": environment, "platform": platform.platform(), "inputs": provenance,
                "collector": file_record(Path(__file__)), "cmake_tool": cmake_tool,
                "dependency_inventory": dependencies, "packages": packages}
+    if requested is not None:
+        context['analysis_scope'] = {'kind': 'explicit_source_subset',
+            'sources': [file_record(p) for p in sorted(requested)],
+            'scope': 'only listed TUs are analyzed; other target TUs remain excluded with reasons'}
     cache_context = digest(context)
-    entries, compilers, matched = [], {}, set()
+    entries, compilers, matched, selected_sources = [], {}, set(), set()
     for number, entry in enumerate(json.loads((build / "compile_commands.json").read_text())):
         row = {"index": number, "raw": entry, "status": "failed", "reason": None}
         try:
@@ -319,6 +327,11 @@ def collect(build, names, *, configuration=None, oai=False, dependency_lock=None
                        selected_by=members.get(target["id"], []))
             if target["id"] not in members:
                 row.update(status="excluded", reason="outside selected target dependency closure")
+                entries.append(row)
+                continue
+            selected_sources.add(path)
+            if requested is not None and path not in requested:
+                row.update(status="excluded", reason="outside explicit analysis source subset; not analyzed")
                 entries.append(row)
                 continue
             if group["language"] not in ("C", "CXX"):
@@ -351,6 +364,10 @@ def collect(build, names, *, configuration=None, oai=False, dependency_lock=None
             if "compileGroupIndex" in item and (key, item["path"]) not in matched:
                 entries.append({"status": "failed", "source": item["path"], "target_id": key,
                                 "reason": "selected CMake translation unit missing from compile DB"})
+    if requested is not None:
+        for path in sorted(requested - selected_sources):
+            entries.append({'status': 'failed', 'source': str(path),
+                            'reason': 'requested analysis source absent from selected target compile DB closure'})
     summary = {status: sum(r["status"] == status for r in entries)
                for status in ("validated", "excluded", "failed")}
     manifest = {"schema_version": 1, "kind": "build_input_manifest", "profile": "oai" if oai else "generic",
@@ -376,6 +393,7 @@ def main():
     capture.add_argument("--profile", choices=("oai", "generic"), default="oai")
     capture.add_argument("--out", required=True, type=Path)
     capture.add_argument("--dependency-lock", type=Path)
+    capture.add_argument("--source", type=Path, action="append", help="Explicit TU subset, relative to CMake source root; repeatable")
     options = parser.parse_args()
     if options.action == "query":
         query(options.build)
@@ -383,7 +401,7 @@ def main():
     options.out.mkdir(parents=True, exist_ok=True)
     try:
         manifest = collect(options.build, options.target, configuration=options.configuration,
-                           oai=options.profile == "oai", dependency_lock=options.dependency_lock)
+                           oai=options.profile == "oai", dependency_lock=options.dependency_lock, sources=options.source)
     except (ValueError, KeyError, OSError, subprocess.SubprocessError) as error:
         manifest = {"schema_version": 1, "kind": "build_input_manifest", "ready": False,
                     "entries": [], "failures": [{"reason": str(error)}]}

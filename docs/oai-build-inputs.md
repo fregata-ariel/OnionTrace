@@ -111,6 +111,13 @@ configure/File API自体の不備はトップレベルの失敗として記録�
 
 ## キャッシュ境界
 
+T9では`capture --source RELATIVE_TU`を繰り返して解析するTUのsubsetを明示できる。
+省略時は従来どおり選択targetの全依存閉包を検査する。指定時も全compile DBとCMakeを
+照合してエントリを保持し、subset外は`outside explicit analysis source subset; not analyzed`として除外する。
+指定sourceが選択targetのcompile DB閉包に存在しない場合は失敗する。
+`context.analysis_scope`に対象sourceのpath/hashを記録し、subset変更はcache_keyを無効にする。
+これは生成物不足や未知の引数を成功扱いする回避策ではなく、総合受入が主張する範囲の指定である。
+
 cache_keyは将来の抽出器へ渡す入力識別子であり、T2はキャッシュ済みの抽出結果を再利用しない。
 毎回検査して依存を再列挙するため、新たにincludeされたファイルも反映する。
 キーにはsource・cwd・順序付き引数、実コンパイラの版・実体ハッシュ、全依存ファイルのハッシュ、

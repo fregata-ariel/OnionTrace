@@ -27,7 +27,9 @@ def export_acceptance(manifest, extraction, out, *, oai=False):
     (out / 'structure.html').unlink(missing_ok=True)
     summary = {'schema_version': 1, 'kind': 'structure_acceptance', 'passed': False,
                'full_extraction_verified': False, 'runtime_evidence': False,
-               'input_manifest_id': manifest.get('manifest_id'), 'gates': [], 'targets': []}
+               'input_manifest_id': manifest.get('manifest_id'),
+               'analysis_scope': manifest.get('context', {}).get('analysis_scope'),
+               'gates': [], 'targets': []}
 
     def gate(name, action):
         try:

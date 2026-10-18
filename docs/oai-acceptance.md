@@ -25,14 +25,19 @@ Ubuntu 24.04の使い捨てrunner、Python 3.12、Clang/LLVM 18、CMake/Ninjaを
 4. 固定`build_oai`引数（gNB、nrUE、SIMU、Clang 18、RelWithDebInfo、ccache無効）で
    configure/buildする。File API queryはconfigure前に置く。さらにCMake buildの終了値と
    両実行ファイルの存在・hashを確認する。build_oaiの成功メッセージだけでは合格させない。
-5. T2のOAI profileで両ターゲットの依存閉包をcaptureし、T3を実行する。
+5. T2のOAI profileで両ターゲットの依存閉包と全compile DBを照合し、
+   `config/oai-analysis-scope.json`の10翻訳単位について入力検証とT3を実行する。
+   固定source auditの全Cソースを含み、ヘッダは実際の依存として検証する。
+   このsubset以外もmanifestから削除せず、未解析の除外理由を明記する。
+   requested sourceが依存閉包に無い場合は失敗。同一sourceの複数条件は全て保持する。
    manifestのコンパイル条件を削ったり、生成ヘッダ不足を握りつぶしたりしない。
 6. 各targetについてT4/T5/T6 → T1/T7 → T8のworkspace・構造モデル・表示projection・
    offline HTMLを出力する。T4の5経路、T5の13地点、T6のソース18地点中の意味地点と
    6候補接続を固定byte位置・hashから再計算する。contract文は別途source hashで確認する。
 
 通常のソース監査JSON、手書きのgraph、fixture、別revisionは総合gateを通過できない。
-`full_extraction_verified`は全gateが合格した実OAI runだけtrueになる。
+`full_extraction_verified`は上記の明示した解析範囲で全gateが合格した実OAI runだけtrueになる。
+全OAIの解析完了を意味しない。12,244件ある固定版のcompile DB全体と、対象subsetを区別する。
 静的候補・未知の別名・未解決呼出し・NULL callback・展開上限は成果物に残し、実行証拠を生成しない。
 入力条件を変えた場合はcaptureからやり直す。ソース取得や依存準備だけの成功は受入完了を意味しない。
 
