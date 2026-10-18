@@ -12,6 +12,9 @@ from onion.integration import (connect, open_region, initial_plan, reconstruct_r
     recommend_region, accumulate_regions)
 from onion.libtooling import extract_manifest, build_model
 from onion.viewer import export_viewer
+from onion.threads import build_threads
+from onion.callbacks import build_callbacks, _callbacks_from_threads
+from onion.queues import build_queues, _queues_from_sources
 from test_model_integration import sites, trace
 from test_queues import run, ROOT
 
@@ -79,6 +82,19 @@ class ModelNativeTests(unittest.TestCase):
         self.assertLessEqual({n['id'] for n in selected['model']['nodes']},
                              {n['id'] for n in view['cfgs'][selected['function_id']]['nodes']})
         self.assertFalse(view['runtime_evidence'])
+
+    def test_workspace_graph_reuse_preserves_standalone_results_and_input_graphs(self):
+        targets = ['integration_fixture']
+        threads = build_threads(self.manifest, self.extraction, targets)
+        snapshot = copy.deepcopy(threads)
+        callbacks = _callbacks_from_threads(self.manifest, self.extraction, threads)
+        self.assertEqual(callbacks, build_callbacks(self.manifest, self.extraction, targets))
+        callback_snapshot = copy.deepcopy(callbacks)
+        queues = _queues_from_sources(self.manifest, self.extraction, threads, callbacks)
+        self.assertEqual(queues, build_queues(self.manifest, self.extraction, targets))
+        self.assertEqual(threads, snapshot)
+        self.assertEqual(callbacks, callback_snapshot)
+        self.assertEqual(self.workspace['sources'], {'threads': threads, 'callbacks': callbacks, 'queues': queues})
 
     def test_child_interval_build_isolation_and_serialization(self):
         ref = self.ref('callee')

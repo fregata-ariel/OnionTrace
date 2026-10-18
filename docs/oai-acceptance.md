@@ -40,6 +40,13 @@ Ubuntu 24.04の使い捨てrunner、Python 3.12、Clang/LLVM 18、CMake/Ninjaを
 6. 各targetについてT4/T5/T6 → T1/T7 → T8のworkspace・構造モデル・表示projection・
    offline HTMLを出力する。T4の5経路、T5の13地点、T6のソース18地点中の意味地点と
    6候補接続を固定byte位置・hashから再計算する。contract文は別途source hashで確認する。
+   同一workspace内で直前に検証したthread/callback graphを共有し、重複探索を避ける。
+
+CIは`--capture-only`でnative抽出まで実行して`oai-native-*` Artifactを先に保存し、
+別stepの`--resume-acceptance`で総合gateを実行する。前半だけでは`run.json.passed`はfalseのまま。
+再開時にOnionTrace commit、manifest、抽出一覧、両実行ファイルのhashを照合し、各nativeファイルも
+モデル構築時に再検証する。再構成stepは20分・仮想メモリ6GiBを上限とし、runner停止前に失敗を
+診断できるようにする。native Artifactは総合受入の代わりにはならない。
 
 通常のソース監査JSON、手書きのgraph、fixture、別revisionは総合gateを通過できない。
 `full_extraction_verified`は上記の明示した解析範囲で全gateが合格した実OAI runだけtrueになる。

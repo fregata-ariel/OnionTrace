@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 import traceback
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,7 +23,7 @@ from onion.oai_queues import audit_sources as audit_queues, EXPECTATIONS as QUEU
 from scripts.prepare_oai import prepare
 
 
-def run_acceptance(out, tool, *, jobs=2):
+def run_acceptance(out, tool, *, jobs=2, capture_only=False):
     out = Path(out).resolve()
     # A previous success must never survive a failed rerun.
     out.mkdir(parents=True, exist_ok=False)
@@ -37,6 +38,8 @@ def run_acceptance(out, tool, *, jobs=2):
         row = {'name': name, 'passed': False}
         stages.append(row)
         write(out / 'run.json', result)
+        print('START ' + name, flush=True)
+        start = time.monotonic()
         try:
             value = action()
             row['passed'] = True
@@ -46,7 +49,9 @@ def run_acceptance(out, tool, *, jobs=2):
             (out / (name + '-error.log')).write_text(traceback.format_exc())
             raise
         finally:
+            row['seconds'] = round(time.monotonic() - start, 2)
             write(out / 'run.json', result)
+            print('END ' + name + ' ' + str(row), flush=True)
 
     def command(name, args, cwd=None, env=None):
         with (out / (name + '.log')).open('w') as log:
@@ -120,6 +125,12 @@ def run_acceptance(out, tool, *, jobs=2):
                 raise ValueError('OAI extraction failed; see extraction/failures.json')
             return extraction
         extraction = stage('extract', extract)
+        result['extraction_verified'] = True
+        result['captured_inputs'] = [file_record(out / 'inputs/manifest.json'),
+                                     file_record(out / 'extraction/extraction.json')]
+        if capture_only:
+            result['pending_stages'] = ['acceptance']
+            return result
         def accept():
             acceptance = export_acceptance(manifest, extraction, out / 'acceptance', oai=True)
             if not acceptance['passed']:
@@ -136,15 +147,63 @@ def run_acceptance(out, tool, *, jobs=2):
     return result
 
 
+def resume_acceptance(out):
+    """Resume in the same workspace after native evidence has been uploaded."""
+    out = Path(out).resolve()
+    result = json.loads((out / 'run.json').read_text())
+    result.update(passed=False, full_extraction_verified=False)
+    row = {'name': 'acceptance', 'passed': False}
+    result['stages'].append(row)
+    write(out / 'run.json', result)
+    start = time.monotonic()
+    print('START acceptance', flush=True)
+    try:
+        if (result.get('kind') != 'oai_ci_run' or not result.get('extraction_verified')
+                or result.get('pending_stages') != ['acceptance']
+                or not result.get('binaries') or not result.get('captured_inputs')
+                or not all(s['passed'] for s in result['stages'][:-1])):
+            raise ValueError('expected a successful capture-only OAI run')
+        if result['onion_commit'] != subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip():
+            raise ValueError('OnionTrace commit changed since native capture')
+        for record in result['captured_inputs'] + result['binaries']:
+            if file_record(record['path']) != record:
+                raise ValueError('captured input or binary changed: ' + record['path'])
+        manifest = json.loads((out / 'inputs/manifest.json').read_text())
+        extraction = json.loads((out / 'extraction/extraction.json').read_text())
+        acceptance = export_acceptance(manifest, extraction, out / 'acceptance', oai=True)
+        if not acceptance['passed']:
+            raise ValueError('OAI acceptance failed; see acceptance/failures.json')
+        row['passed'] = True
+        result.update(passed=True, full_extraction_verified=True, pending_stages=[])
+        result.pop('failure', None)
+    except Exception as error:
+        row['failure'] = result['failure'] = str(error)
+        (out / 'acceptance-error.log').write_text(traceback.format_exc())
+    finally:
+        row['seconds'] = round(time.monotonic() - start, 2)
+        write(out / 'run.json', result)
+        write(out / 'failures.json', [s for s in result['stages'] if not s['passed']])
+        print('END acceptance ' + str(row), flush=True)
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out', type=Path, required=True)
-    parser.add_argument('--tool', type=Path, required=True)
+    parser.add_argument('--tool', type=Path)
     parser.add_argument('--jobs', type=int, default=2)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--capture-only', action='store_true', help='stop before acceptance; does not mark the run passed')
+    mode.add_argument('--resume-acceptance', action='store_true', help='verify unchanged native evidence and finish acceptance')
     args = parser.parse_args()
     if args.jobs < 1:
         parser.error('--jobs must be positive')
-    return 0 if run_acceptance(args.out, args.tool, jobs=args.jobs)['passed'] else 1
+    if args.resume_acceptance:
+        return 0 if resume_acceptance(args.out)['passed'] else 1
+    if args.tool is None:
+        parser.error('--tool is required for build/capture/extraction')
+    result = run_acceptance(args.out, args.tool, jobs=args.jobs, capture_only=args.capture_only)
+    return 0 if result['passed'] or (args.capture_only and result.get('extraction_verified')) else 1
 
 
 if __name__ == '__main__':

@@ -3,15 +3,16 @@ import copy
 import json
 import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
 
 from onion.acceptance import export_acceptance
-from onion.build_inputs import collect, query, digest
+from onion.build_inputs import collect, query, digest, file_record
 from onion.libtooling import extract_manifest
 from test_queues import run, ROOT
-from scripts.oai_ci import run_acceptance
+from scripts.oai_ci import run_acceptance, resume_acceptance
 from scripts.install_oai_dependencies import simde_environment
 
 
@@ -96,6 +97,34 @@ class AcceptanceTests(unittest.TestCase):
         result = export_acceptance(manifest, self.extraction, self.out / 'recaptured')
         self.assertFalse(result['passed'])
 
+    def test_resumed_acceptance_verifies_unchanged_evidence_and_actual_oai_gates(self):
+        destination = self.out / 'resume'
+        (destination / 'inputs').mkdir(parents=True)
+        (destination / 'extraction').mkdir()
+        manifest = destination / 'inputs/manifest.json'
+        extraction = destination / 'extraction/extraction.json'
+        manifest.write_text(json.dumps(self.manifest))
+        extraction.write_text(json.dumps(self.extraction))
+        commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
+        tool = Path(os.environ.get('ONION_EXTRACTOR', ROOT / 'build-libtooling/onion-extract'))
+        record = {'kind': 'oai_ci_run', 'passed': False, 'full_extraction_verified': False,
+                  'extraction_verified': True, 'pending_stages': ['acceptance'], 'onion_commit': commit,
+                  'stages': [{'name': 'extract', 'passed': True}],
+                  'binaries': [file_record(tool)],
+                  'captured_inputs': [file_record(manifest), file_record(extraction)]}
+        (destination / 'run.json').write_text(json.dumps(record))
+        # An interrupted split run cannot turn a fixture into fixed-OAI evidence.
+        result = resume_acceptance(destination)
+        self.assertFalse(result['passed'])
+        self.assertFalse(result['full_extraction_verified'])
+        self.assertTrue((destination / 'acceptance/oai-threads.json').exists())
+        (destination / 'run.json').write_text(json.dumps(record))
+        extraction.write_text('{}')
+        with patch('scripts.oai_ci.export_acceptance') as accept:
+            result = resume_acceptance(destination)
+        accept.assert_not_called()
+        self.assertIn('captured input or binary changed', result['failure'])
+
     def test_isolated_simde_layout_keeps_external_headers_out_of_oai_function_definitions(self):
         destination = self.out / 'isolated-simde'
         header = destination / 'source/x86/gfni.h'
@@ -125,7 +154,9 @@ class RunnerFailureTests(unittest.TestCase):
                 result = run_acceptance(out, Path('missing-tool'))
             self.assertFalse(result['passed'])
             self.assertFalse(result['full_extraction_verified'])
-            self.assertEqual(result['stages'], [{'name': 'fetch', 'passed': False, 'failure': 'pinned checkout mismatch'}])
+            self.assertEqual(result['stages'][0]['name'], 'fetch')
+            self.assertEqual(result['stages'][0]['failure'], 'pinned checkout mismatch')
+            self.assertFalse(result['stages'][0]['passed'])
             self.assertTrue((out / 'fetch-error.log').is_file())
             self.assertTrue(json.loads((out / 'failures.json').read_text()))
             self.assertFalse(json.loads((out / 'run.json').read_text())['passed'])

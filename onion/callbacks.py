@@ -134,6 +134,11 @@ def _contexts(graph, max_contexts, max_depth):
 
 def build_callbacks(manifest, extraction, targets=None, *, max_contexts=10000, max_depth=128):
     threads = build_threads(manifest, extraction, targets, max_contexts=max_contexts, max_depth=max_depth)
+    return _callbacks_from_threads(manifest, extraction, threads, max_contexts=max_contexts, max_depth=max_depth)
+
+
+def _callbacks_from_threads(manifest, extraction, threads, *, max_contexts=10000, max_depth=128):
+    """Reuse a freshly verified thread graph within one workspace operation."""
     graphs = []
     for parent in threads['graphs']:
         functions = {f['id']: f for f in parent['functions']}

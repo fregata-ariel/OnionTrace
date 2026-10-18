@@ -9,11 +9,11 @@ import json
 from pathlib import Path
 
 from .build_inputs import digest
-from .callbacks import build_callbacks
+from .callbacks import _callbacks_from_threads
 from .core import accumulate, reconstruct, recommend, _validate
 from .execution import make_entity, make_relation, make_structure, validate_structure
 from .libtooling import build_model, write
-from .queues import build_queues
+from .queues import _queues_from_sources
 from .threads import build_threads, _load
 
 
@@ -36,8 +36,8 @@ def connect(manifest, extraction, target):
     root in T1 identities. Original ranges, guards and ownership stay in sources.
     """
     threads = build_threads(manifest, extraction, [target])
-    callbacks = build_callbacks(manifest, extraction, [target])
-    queues = build_queues(manifest, extraction, [target])
+    callbacks = _callbacks_from_threads(manifest, extraction, threads)
+    queues = _queues_from_sources(manifest, extraction, threads, callbacks)
     rows, _ = _load(manifest, extraction)
     tg, cg, qg = (doc['graphs'][0] for doc in (threads, callbacks, queues))
     entities, relations, references, functions = {}, {}, [], {}
