@@ -50,11 +50,15 @@ T1ではQueue投入/取得、callback呼出し/束縛を表現し、転送や処
 必要なprobeはT3同様、DeclRefExpr symbolが一箇所へ対応するものを明示的に供給する。
 OAIにプローブを自動挿入する機能はない。
 同じCFG block内の二anchorは、文単位の切出しがないため拒否する。
+開始blockではanchorより前、終了blockではanchorより後のprobeを`expression_index`で拒否する。
+呼出しや文単位の不完全性は、同じAST rangeを持つCFG式の評価順で区間内外を判定する。
+位置を特定できないものや関数全体の不完全性は保守的に保持する。
 到達不能な終端や区間外probeも拒否する。終端に到達しない分岐や循環は削除して一意化せず、
 既存Coreの列挙不完全性に残す。
 
 `open_region(..., anchors=('inner.begin', 'inner.end'), parent=parent)`で子区間を作れる。
-同一workspace・参照contextの厳密に狭い境界で、親のCFG内に含まれることを検証する。
+同一workspace・参照contextの厳密に狭い境界で、親の終了で切断済みのCFGに対する
+node・辺の包含と、境界block内の式位置を検証する。親の終了を越えて次の反復へ進む子区間は拒否する。
 親ID・親の不完全性を保持し、親区間と以前のplan/候補/runを変更しない。
 区間IDはanchor、probe対応、親、モデル、contextを含むcontent digestを持つ。
 block IDにはT1 function IDを付け、別build/targetの蓄積を混同しない。

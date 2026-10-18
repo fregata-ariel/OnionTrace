@@ -186,6 +186,98 @@ class RegionTests(unittest.TestCase):
         self.assertEqual(result['analysis']['status'], 'incomplete')
         self.assertTrue(any(c.get('call_id') == 'raw/call' for c in region['constraints']))
 
+    def test_probes_outside_anchors_in_boundary_blocks_are_rejected(self):
+        w = copy.deepcopy(self.workspace)
+        function = w['extractions']['raw']['functions'][0]
+        for block in function['blocks']:
+            if block['id'] == 'begin':
+                block['elements'].insert(0, {'kind': 'DeclRefExpr', 'index': -1, 'referenced_symbol': 'before_probe'})
+            if block['id'] == 'end':
+                block['elements'].append({'kind': 'DeclRefExpr', 'index': 1, 'referenced_symbol': 'after_probe'})
+        w = reseal(w)
+        for name in ('before', 'after'):
+            catalog = sites() + [{'id': name, 'symbol': name + '_probe', 'kind': 'region'}]
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'probe outside selected region'):
+                open_region(w, self.ref['id'], catalog)
+        region = open_region(w, self.ref['id'], sites())
+        plan = initial_plan(region, ['work.begin', 'work.end', 'left'])
+        self.assertEqual(reconstruct_region(region, plan,
+            trace(region, plan, ['work.begin', 'left', 'work.end']))['analysis']['status'], 'unique')
+
+    def test_boundary_calls_and_statement_uncertainties_use_expression_order(self):
+        for placement, expected in [('before', 'unique'), ('after', 'unique'), ('inside', 'incomplete'), ('unknown', 'incomplete')]:
+            w = copy.deepcopy(self.workspace)
+            function = w['extractions']['raw']['functions'][0]
+            block_id = 'end' if placement == 'after' else 'begin'
+            index = -1 if placement == 'before' else 1
+            span = {'unit_range': placement}
+            block = next(b for b in function['blocks'] if b['id'] == block_id)
+            if placement != 'unknown':
+                block['elements'].append({'kind': 'CallExpr', 'index': index, 'range': span})
+                block['elements'].sort(key=lambda e: e['index'])
+            call = {'id': 'raw/call', 'caller_id': 'raw/process', 'target_id': None,
+                'block_id': block_id, 'range': span, 'resolution': 'unresolved', 'reason': 'unknown target'}
+            function['calls'] = [call]
+            function['uncertainties'] = [{'kind': 'unsupported_statement', 'range': span, 'affects_completeness': True}]
+            w['sources']['threads']['graphs'][0]['relations'] = [
+                {'kind': 'calls', 'id': call['id'], 'resolution': 'unresolved', 'reason': call['reason']}]
+            w['frontiers'] = [{'call_id': call['id'], 'call_path': [call['id']], 'reason': call['reason']}]
+            w = reseal(w)
+            region = open_region(w, self.ref['id'], sites())
+            plan = initial_plan(region, ['work.begin', 'work.end', 'left'])
+            result = reconstruct_region(region, plan, trace(region, plan, ['work.begin', 'left', 'work.end']))
+            with self.subTest(placement=placement):
+                self.assertEqual(result['analysis']['status'], expected)
+                self.assertEqual(bool(region['model']['uncertainties']), expected == 'incomplete')
+
+    def test_child_cannot_reopen_edge_past_parent_exit(self):
+        w = copy.deepcopy(self.workspace)
+        w['extractions']['raw']['functions'][0]['edges'].append({'source': 'end', 'target': 'ib'})
+        w = reseal(w)
+        parent = open_region(w, self.ref['id'], sites())
+        original = copy.deepcopy(parent)
+        with self.assertRaisesRegex(ValueError, 'parent.*boundary|nest'):
+            open_region(w, self.ref['id'], [s for s in sites(True) if s.get('anchor')],
+                        anchors=('inner.end', 'inner.begin'), parent=parent)
+        self.assertEqual(parent, original)
+        valid = open_region(w, self.ref['id'], sites(True), anchors=('inner.begin', 'inner.end'), parent=parent)
+        self.assertEqual(valid['parent_region_id'], parent['id'])
+
+    def test_child_anchor_cannot_extend_past_parent_in_same_block(self):
+        w = copy.deepcopy(self.workspace)
+        function = w['extractions']['raw']['functions'][0]
+        for block in function['blocks']:
+            if block['id'] == 'begin':
+                block['elements'].insert(0, {'kind': 'DeclRefExpr', 'index': -1, 'referenced_symbol': 'before_probe'})
+            if block['id'] == 'end':
+                block['elements'].append({'kind': 'DeclRefExpr', 'index': 1, 'referenced_symbol': 'after_probe'})
+        w = reseal(w)
+        parent = open_region(w, self.ref['id'], sites())
+        for anchors in [('before', 'inner.end'), ('inner.begin', 'after')]:
+            catalog = sites(True) + [{'id': 'before', 'symbol': 'before_probe', 'anchor': True},
+                                    {'id': 'after', 'symbol': 'after_probe', 'anchor': True}]
+            catalog = [s for s in catalog if s['id'] in anchors or s['id'] in ('left', 'right')]
+            with self.subTest(anchors=anchors), self.assertRaisesRegex(ValueError, 'parent.*boundary|nest'):
+                open_region(w, self.ref['id'], catalog, anchors=anchors, parent=parent)
+
+    def test_child_can_narrow_expression_bounds_in_same_parent_blocks(self):
+        w = copy.deepcopy(self.workspace)
+        function = w['extractions']['raw']['functions'][0]
+        for block in function['blocks']:
+            if block['id'] == 'begin':
+                block['elements'].append({'kind': 'DeclRefExpr', 'index': 1, 'referenced_symbol': 'child_open'})
+            if block['id'] == 'end':
+                block['elements'].insert(0, {'kind': 'DeclRefExpr', 'index': -1, 'referenced_symbol': 'child_close'})
+        w = reseal(w)
+        parent = open_region(w, self.ref['id'], sites())
+        catalog = [{'id': 'child.begin', 'symbol': 'child_open', 'anchor': True},
+                   {'id': 'child.end', 'symbol': 'child_close', 'anchor': True}]
+        child = open_region(w, self.ref['id'], catalog, anchors=('child.begin', 'child.end'), parent=parent)
+        self.assertEqual(child['model']['region'], parent['model']['region'])
+        self.assertGreater(child['boundary']['entry_expression_index'], parent['boundary']['entry_expression_index'])
+        self.assertLess(child['boundary']['exit_expression_index'], parent['boundary']['exit_expression_index'])
+        self.assertEqual(child['parent_region_id'], parent['id'])
+
     def test_unrelated_frontier_does_not_poison_selected_interval(self):
         w = copy.deepcopy(self.workspace)
         w['frontiers'] = [{'call_id': 'unrelated', 'call_path': ['unrelated'], 'reason': 'unknown target'}]

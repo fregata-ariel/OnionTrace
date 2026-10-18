@@ -10,7 +10,7 @@ from onion.build_inputs import collect, query
 from onion.execution import validate_structure
 from onion.integration import (connect, open_region, initial_plan, reconstruct_region,
     recommend_region, accumulate_regions)
-from onion.libtooling import extract_manifest
+from onion.libtooling import extract_manifest, build_model
 from test_model_integration import sites, trace
 from test_queues import run, ROOT
 
@@ -86,6 +86,30 @@ class ModelNativeTests(unittest.TestCase):
         self.assertEqual(json.loads(json.dumps(self.workspace)), self.workspace)
         with self.assertRaisesRegex(ValueError, 'select exactly one'):
             open_region(other, ref['id'], sites())
+
+    def test_native_boundary_probes_calls_and_asm_use_cfg_expression_order(self):
+        w = self.workspace
+        ref = self.ref('callee', 'boundary_calls')
+        source = w['functions'][ref['function_id']]
+        raw = w['extractions'][source['compilation_id']]
+        catalog = sites() + [{'id': name, 'symbol': name + '_probe', 'kind': 'region'}
+                             for name in ('before', 'after')]
+        full = build_model(raw, source['source_function_id'], catalog, w['build_id'], {})
+        mapped = {s['id']: s for s in full['sites']}
+        for name, anchor in [('before', 'work.begin'), ('after', 'work.end')]:
+            self.assertEqual(mapped[name]['node'], mapped[anchor]['node'])
+            self.assertEqual(mapped[name]['expression_index'] < mapped[anchor]['expression_index'], name == 'before')
+            with self.subTest(probe=name), self.assertRaisesRegex(ValueError, 'probe outside selected region'):
+                open_region(w, ref['id'], sites() + [next(s for s in catalog if s['id'] == name)])
+        function = next(f for f in raw['functions'] if f['id'] == source['source_function_id'])
+        self.assertEqual(len(function['calls']), 2)
+        self.assertTrue(function['uncertainties'])
+        region = open_region(w, ref['id'], sites())
+        self.assertFalse(region['constraints'])
+        self.assertFalse(region['model']['uncertainties'])
+        plan = initial_plan(region, ['work.begin', 'work.end', 'left'])
+        result = reconstruct_region(region, plan, trace(region, plan, ['work.begin', 'left', 'work.end']))
+        self.assertEqual(result['analysis']['status'], 'unique')
 
     def test_existing_queue_fixture_diagnostics_remain_valid_t1(self):
         # Its unreachable queue operations, NULL/unknown callbacks, response

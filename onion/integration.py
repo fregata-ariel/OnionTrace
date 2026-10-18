@@ -272,15 +272,62 @@ def open_region(workspace, reference_id, sites, *, anchors=('work.begin', 'work.
         raise ValueError('closing anchor is unreachable')
     model['nodes'] = [n for n in model['nodes'] if n['id'] in reached]
     model['edges'] = [e for e in model['edges'] if e['source'] in reached and e['target'] in reached and e['source'] != model['region']['exit']]
-    if any(s['node'] not in reached for s in model['sites']):
+    by_site = {s['id']: s for s in model['sites']}
+    entry_index, exit_index = (by_site[a]['expression_index'] for a in anchors)
+    entry_node, exit_node = model['region']['entry'], model['region']['exit']
+
+    def inside(node, index):
+        return (node in reached and (node != entry_node or index >= entry_index) and
+                (node != exit_node or index <= exit_index))
+
+    if any(not inside(s['node'], s['expression_index']) for s in model['sites']):
         raise ValueError('probe outside selected region')
     if parent is not None:
         _intact(parent, 'analysis_region')
+        parent_model = parent['model']
+        child_edges = {(e['source'], e['target']) for e in model['edges']}
+        parent_edges = {(e['source'], e['target']) for e in parent_model['edges']}
+        parent_entry, parent_exit = parent_model['region']['entry'], parent_model['region']['exit']
+        parent_begin = parent['boundary']['entry_expression_index']
+        parent_end = parent['boundary']['exit_expression_index']
+        def inside_parent(node, index):
+            return ((node != parent_entry or index >= parent_begin) and
+                    (node != parent_exit or index <= parent_end))
         if (parent['workspace_id'] != workspace['id'] or parent['reference']['id'] != ref['id'] or
-                not reached <= {n['id'] for n in parent['model']['nodes']}):
-            raise ValueError('child region must nest in the same function/context')
-        if model['region'] == parent['model']['region']:
+                not reached <= {n['id'] for n in parent_model['nodes']} or
+                not child_edges <= parent_edges or
+                not inside_parent(entry_node, entry_index) or not inside_parent(exit_node, exit_index) or
+                (parent_exit in reached and exit_node != parent_exit) or
+                (parent_entry in reached and entry_node != parent_entry)):
+            raise ValueError('child region must nest inside the closed parent CFG boundary')
+        if (model['region'] == parent_model['region'] and
+                (entry_index, exit_index) == (parent_begin, parent_end)):
             raise ValueError('child must have a narrower boundary')
+    function = next(f for f in raw['functions'] if f['id'] == source['source_function_id'])
+    # Calls and statement diagnostics share exact AST ranges with CFG elements.
+    # Use CFG evaluation order, not source line ordering (which is unsafe for
+    # macros/expressions). Missing or ambiguous placement remains conservative.
+    positions = {}
+    for block in function['blocks']:
+        for element in block['elements']:
+            if element.get('range') is not None:
+                positions.setdefault(digest(element['range']), []).append((scoped[block['id']], element['index']))
+
+    def statement_inside(record):
+        block = record.get('block_id', record.get('source'))
+        node = scoped.get(block)
+        if node is not None and node not in reached:
+            return False
+        if node == exit_node and record.get('kind', '').endswith('_successor'):
+            return False  # The closing anchor cuts successor traversal.
+        matches = positions.get(digest(record['range']), []) if record.get('range') is not None else []
+        if node is not None:
+            matches = [p for p in matches if p[0] == node]
+        if matches:
+            return any(inside(n, i) for n, i in matches)
+        return True  # Function-wide or unplaced evidence may affect this region.
+
+    model['uncertainties'] = [u for u in model['uncertainties'] if statement_inside(u)]
     constraints = copy.deepcopy(workspace['incompleteness'])
     if parent is not None:
         constraints.extend(copy.deepcopy(parent['constraints']))
@@ -288,9 +335,7 @@ def open_region(workspace, reference_id, sites, *, anchors=('work.begin', 'work.
     # certainty; unrelated source diagnostics remain visible in the workspace.
     record = ref['source_record']
     chain = record.get('call_path', record.get('context', {}).get('call_path', []))
-    local_calls = {c['id'] for c in next(f for f in raw['functions']
-        if f['id'] == source['source_function_id'])['calls']
-        if c['block_id'] in {old for old, new in scoped.items() if new in reached}}
+    local_calls = {c['id'] for c in function['calls'] if statement_inside(c)}
     relevant_calls = set(chain) | local_calls
     for edge in workspace['sources']['threads']['graphs'][0]['relations']:
         if edge['kind'] == 'calls' and edge['id'] in relevant_calls and edge['resolution'] != 'resolved':
@@ -315,6 +360,7 @@ def open_region(workspace, reference_id, sites, *, anchors=('work.begin', 'work.
         'parent_region_id': parent['id'] if parent else None, 'anchors': list(anchors),
         'constraints': constraints, 'conditions': [copy.deepcopy(r['evidence']['conditions'])
             for r in workspace['structure']['relations'] if r['id'] in ref['relation_ids']], 'boundary': {'ordering': 'one thread per job inside local interval',
+        'entry_expression_index': entry_index, 'exit_expression_index': exit_index,
         'asynchronous_links_are_cfg_edges': False, 'runtime_context_proven': False}})
 
 
