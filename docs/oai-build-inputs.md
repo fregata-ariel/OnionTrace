@@ -19,6 +19,10 @@ manifestに記録する。CMake版・OS依存の更新は入力条件の変更�
 [build_helper](https://github.com/duranta-project/openairinterface5g/blob/7fa4d018d4178f9664ea1ca377eca2e822c7a979/cmake_targets/tools/build_helper)
 に従う。`--gNB --nrUE -w SIMU --ninja --noavx512` を使い、両コンパイラ、
 `CMAKE_EXPORT_COMPILE_COMMANDS=ON`、`CMAKE_BUILD_TYPE=RelWithDebInfo` を明示する。
+CPU条件はC/C++とも`-march=x86-64-v3 -mgfni -mvpclmulqdq`を
+`CMAKE_C_FLAGS`／`CMAKE_CXX_FLAGS`から渡し、OAIが先頭へ加える`-march=native`より後で
+適用する。これによりホストのAVX-512/AVX10条件がClang 18のビルドへ入り込むことを防ぐ。
+GFNIとVPCLMULQDQはOAIのnative SIMDe定義に対応する。元引数・最終CPU/feature展開を記録する。
 compiler launcherを介さないよう`CCACHE_ACTIVE=OFF`とし、CPM_SOURCE_CACHEもworkspace内へ分離する。
 `--gNB`はnr-cuupも、SIMUと共通処理はrfsimulator等もビルドするが、解析対象は両softmodemの
 CMake依存閉包とする。dlopenで読み込むライブラリを自動的に依存閉包へ追加しない。

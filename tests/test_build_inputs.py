@@ -37,6 +37,33 @@ class JsonProtocolTests(unittest.TestCase):
             self.assertLess(compact.stat().st_size, path.stat().st_size)
 
 
+class OaiCpuBaselineTests(unittest.TestCase):
+    def test_locked_c_and_cxx_flags_override_native_without_avx512(self):
+        lock = json.loads((ROOT / 'config/oai-2026.w07.json').read_text())
+        arguments = lock['build_oai_arguments']
+        # build_oai evals --cmake-opt: preserve each quoted flag value as one
+        # CMake argument, just as the actual configure command does.
+        options = dict(arg[2:].split('=', 1) for arg in
+                       shlex.split(arguments[arguments.index('--cmake-opt') + 1]))
+        for language, variable, compiler in (
+                ('c', 'CMAKE_C_FLAGS', os.environ.get('ONION_CLANG', 'clang-18')),
+                ('c++', 'CMAKE_CXX_FLAGS', os.environ.get('ONION_CLANGXX', 'clang++-18'))):
+            with self.subTest(language=language):
+                flags = ['-mno-avx512f', '-march=native', *shlex.split(options[variable])]
+                macros = subprocess.run([compiler, *flags, '-dM', '-E', '-x', language, '-'],
+                                        input='', text=True, capture_output=True, check=True).stdout
+                self.assertNotIn('#define __AVX512', macros)
+                self.assertNotIn('#define __AVX10', macros)
+                for feature in ('AVX2', 'GFNI', 'VPCLMULQDQ'):
+                    self.assertIn('#define __' + feature + '__ 1', macros)
+                # Exercise the exact native intrinsics promised to SIMDe.
+                source = '#include <immintrin.h>\n__m256i f(__m256i a, __m256i b) {' \
+                         'a = _mm256_gf2p8affine_epi64_epi8(a, b, 0);' \
+                         'return _mm256_clmulepi64_epi128(a, b, 0);}\n'
+                subprocess.run([compiler, *flags, '-O2', '-S', '-o', os.devnull, '-x', language, '-'],
+                               input=source, text=True, capture_output=True, check=True)
+
+
 class BuildInputTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="onion-build-inputs-")

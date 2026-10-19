@@ -29,8 +29,12 @@ Ubuntu 24.04の使い捨てrunner、Python 3.12、Clang/LLVM 18、CMake/Ninjaを
    両実行ファイルの存在・hashを確認する。build_oaiの成功メッセージだけでは合格させない。
    固定版のLDPC encoderはAVX-512 VBMI経路でClang 18 backendがクラッシュしたため、
    OAIの正式optionでAVX-512を無効にする。OAIソースは変更しない。
-   OAIが付ける`-march=native`は保持し、Clang `-###`の展開済みCPU/featureをmanifestに記録して
-   host差を入力条件の差として検出する。
+   CPU条件はC/C++とも`-march=x86-64-v3 -mgfni -mvpclmulqdq`に固定する。
+   OAIが先頭へ加える`-march=native`の後に、正式な`CMAKE_C_FLAGS`／`CMAKE_CXX_FLAGS`で
+   この条件を渡す。GFNIとVPCLMULQDQはOAIがnative SIMDeとして要求する機能に合わせる。
+   `--noavx512`だけではホストによって後続の`-march=native`がAVX-512/AVX10系の条件を
+   有効にし、Clang 18の`evex512`不整合でビルドが失敗したため、最終CPU条件も固定する。
+   元の全引数とClang `-###`の最終CPU/feature展開はmanifestに保持する。
 5. T2のOAI profileで両ターゲットの依存閉包と全compile DBを照合し、
    `config/oai-analysis-scope.json`の10翻訳単位について入力検証とT3を実行する。
    固定source auditの全Cソースを含み、ヘッダは実際の依存として検証する。
