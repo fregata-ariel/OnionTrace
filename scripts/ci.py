@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -12,6 +13,15 @@ sys.path.insert(0, str(ROOT))
 
 from onion.core import reconstruct, recommend
 from onion.demo import run_demo, render_report
+from onion.build_inputs import query
+from onion.libtooling import extract_manifest
+from onion.build_inputs import collect
+from onion.threads import build_threads
+from onion.callbacks import build_callbacks
+from onion.queues import build_queues
+from onion.integration import connect
+from onion.viewer import export_viewer
+from onion.acceptance import export_acceptance
 
 
 class Tee:
@@ -53,6 +63,88 @@ def main():
     incomplete_view(data, output / 'incomplete-demo.html')
     os.environ['ONION_TEST_SESSION'] = str(output / 'session.json')
     os.environ['ONION_CLANG'] = options.cc
+    manifest_build = output / 'build-inputs/cmake'
+    query(manifest_build)
+    subprocess.run(['cmake', '-S', str(ROOT / 'fixture/compilation'), '-B', str(manifest_build),
+                    '-G', 'Ninja', '-DCMAKE_C_COMPILER=' + options.cc], check=True)
+    subprocess.run(['cmake', '--build', str(manifest_build)], check=True)
+    subprocess.run([sys.executable, '-m', 'onion.build_inputs', 'capture', '--profile', 'generic',
+                    '--build', str(manifest_build), '--target', 'nr-softmodem',
+                    '--target', 'nr-uesoftmodem', '--out', str(output / 'build-inputs')], cwd=ROOT, check=True)
+    tooling_build = output / 'libtooling-build'
+    subprocess.run(['cmake', '-S', str(ROOT / 'tools/libtooling'), '-B', str(tooling_build),
+                    '-G', 'Ninja', '-DLLVM_DIR=' + os.environ.get('LLVM_DIR', '/usr/lib/llvm-18/lib/cmake/llvm'),
+                    '-DClang_DIR=' + os.environ.get('Clang_DIR', '/usr/lib/llvm-18/lib/cmake/clang')], check=True)
+    subprocess.run(['cmake', '--build', str(tooling_build), '--parallel', '2'], check=True)
+    tool = tooling_build / 'onion-extract'
+    os.environ['ONION_EXTRACTOR'] = str(tool)
+    manifest = json.loads((output / 'build-inputs/manifest.json').read_text())
+    extraction = extract_manifest(manifest, tool, output / 'source-extraction')
+    if not extraction['ready']:
+        raise RuntimeError('Source extraction failed: ' + json.dumps(extraction['summary']))
+    thread_build = output / 'threads/build'
+    query(thread_build)
+    subprocess.run(['cmake', '-S', str(ROOT / 'fixture/threads'), '-B', str(thread_build),
+                    '-G', 'Ninja', '-DCMAKE_C_COMPILER=' + options.cc], check=True)
+    thread_manifest = collect(thread_build, ['nr-softmodem', 'nr-uesoftmodem'])
+    thread_extraction = extract_manifest(thread_manifest, tool, output / 'threads/extraction')
+    thread_graph = build_threads(thread_manifest, thread_extraction)
+    for name, value in [('manifest', thread_manifest), ('threads', thread_graph)]:
+        (output / 'threads' / (name + '.json')).write_text(json.dumps(value, indent=2) + '\n')
+    if not thread_graph['ready'] or any(not g['spawns'] for g in thread_graph['graphs']):
+        raise RuntimeError('Thread fixture extraction failed')
+    callback_build = output / 'callbacks/build'
+    query(callback_build)
+    subprocess.run(['cmake', '-S', str(ROOT / 'fixture/callbacks'), '-B', str(callback_build),
+                    '-G', 'Ninja', '-DCMAKE_C_COMPILER=' + options.cc], check=True)
+    callback_manifest = collect(callback_build, ['nr-softmodem', 'nr-uesoftmodem'])
+    callback_extraction = extract_manifest(callback_manifest, tool, output / 'callbacks/extraction')
+    callback_graph = build_callbacks(callback_manifest, callback_extraction)
+    for name, value in [('manifest', callback_manifest), ('callbacks', callback_graph)]:
+        (output / 'callbacks' / (name + '.json')).write_text(json.dumps(value, indent=2) + '\n')
+    if not callback_graph['ready'] or any(not g['registrations'] for g in callback_graph['graphs']):
+        raise RuntimeError('Callback fixture extraction failed')
+    queue_build = output / 'queues/build'
+    query(queue_build)
+    subprocess.run(['cmake', '-S', str(ROOT / 'fixture/queues'), '-B', str(queue_build),
+                    '-G', 'Ninja', '-DCMAKE_C_COMPILER=' + options.cc], check=True)
+    queue_manifest = collect(queue_build, ['nr-softmodem', 'nr-uesoftmodem'])
+    queue_extraction = extract_manifest(queue_manifest, tool, output / 'queues/extraction')
+    queue_graph = build_queues(queue_manifest, queue_extraction)
+    for name, value in [('manifest', queue_manifest), ('queues', queue_graph)]:
+        (output / 'queues' / (name + '.json')).write_text(json.dumps(value, indent=2) + '\n')
+    if not queue_graph['ready'] or any(not g['operations'] for g in queue_graph['graphs']):
+        raise RuntimeError('Queue fixture extraction failed')
+    integration_build = output / 'integration/build'
+    query(integration_build)
+    subprocess.run(['cmake', '-S', str(ROOT / 'fixture/model-integration'), '-B', str(integration_build),
+                    '-G', 'Ninja', '-DCMAKE_C_COMPILER=' + options.cc], check=True)
+    subprocess.run(['cmake', '--build', str(integration_build)], check=True)
+    integration_manifest = collect(integration_build, ['integration_fixture', 'integration_other'])
+    integration_extraction = extract_manifest(integration_manifest, tool, output / 'integration/extraction')
+    workspace = connect(integration_manifest, integration_extraction, 'integration_fixture')
+    for name, value in [('manifest', integration_manifest), ('workspace', workspace), ('structure', workspace['structure'])]:
+        (output / 'integration' / (name + '.json')).write_text(json.dumps(value, indent=2) + '\n')
+    export_viewer([workspace], output / 'integration/structure.html')
+    viewer_build = output / 'structure-viewer/build'
+    query(viewer_build)
+    subprocess.run(['cmake', '-S', str(ROOT / 'fixture/structure-viewer'), '-B', str(viewer_build),
+                    '-G', 'Ninja', '-DCMAKE_C_COMPILER=' + options.cc], check=True)
+    subprocess.run(['cmake', '--build', str(viewer_build)], check=True)
+    viewer_manifest = collect(viewer_build, ['nr-softmodem', 'nr-uesoftmodem'])
+    viewer_extraction = extract_manifest(viewer_manifest, tool, output / 'structure-viewer/extraction')
+    if not viewer_manifest['ready'] or not viewer_extraction['ready']:
+        raise RuntimeError('Structure viewer fixture extraction failed')
+    viewer_workspaces = [connect(viewer_manifest, viewer_extraction, target)
+                         for target in ('nr-softmodem', 'nr-uesoftmodem')]
+    for target, value in zip(('nr-softmodem', 'nr-uesoftmodem'), viewer_workspaces):
+        (output / 'structure-viewer' / (target + '.json')).write_text(json.dumps(value, indent=2) + '\n')
+    (output / 'structure-viewer/manifest.json').write_text(json.dumps(viewer_manifest, indent=2) + '\n')
+    export_viewer(viewer_workspaces, output / 'structure-demo.html', data)
+    export_viewer(viewer_workspaces, output / 'structure-only.html')
+    acceptance = export_acceptance(viewer_manifest, viewer_extraction, output / 'acceptance')
+    if not acceptance['passed']:
+        raise RuntimeError('End-to-end structure acceptance failed; see acceptance/failures.json')
     suite = unittest.defaultTestLoader.discover(str(ROOT / 'tests'), pattern='test_*.py')
     with (output / 'tests.log').open('w') as log:
         result = unittest.TextTestRunner(stream=Tee(sys.stdout, log), verbosity=2).run(suite)
@@ -68,3 +160,4 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+

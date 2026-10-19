@@ -1,0 +1,250 @@
+{
+  "schema_version": 1,
+  "revision": "7fa4d018d4178f9664ea1ca377eca2e822c7a979",
+  "target": "nr-softmodem",
+  "sources": [
+    {
+      "path": "executables/nr-gnb.c",
+      "sha256": "sha256:c7c488de7b2aeeb3f1e57904d1387f2c43339e1da94cd6c8c7c503bcd183ed7a"
+    },
+    {
+      "path": "executables/nr-ru.c",
+      "sha256": "sha256:4658738fe14a68a54035f036d5f274e06a1989594fd879a7e9c13b5245b45e35"
+    },
+    {
+      "path": "common/utils/threadPool/notified_fifo.h",
+      "sha256": "sha256:9865344ade166bd78190c63f6199020bff530a3db75f327d3939df46878b27e3"
+    },
+    {
+      "path": "common/utils/actor/actor.c",
+      "sha256": "sha256:ed68c487116f2b3f55277a12ceb2febb0b97f60fd18b3585a02175a2beb302cd"
+    }
+  ],
+  "sites": [
+    {
+      "key": "resp_initialize",
+      "path": "executables/nr-gnb.c",
+      "function": "init_gNB_Tpool",
+      "text": "initNotifiedFIFO(&gNB->resp_L1)",
+      "start_offset": 14366,
+      "end_offset": 14397,
+      "line": 349,
+      "group": "operations",
+      "operation": "initialize"
+    },
+    {
+      "key": "completion_initialize",
+      "path": "executables/nr-gnb.c",
+      "function": "init_gNB_Tpool",
+      "text": "initNotifiedFIFO(&gNB->L1_rx_out)",
+      "start_offset": 14461,
+      "end_offset": 14494,
+      "line": 352,
+      "group": "operations",
+      "operation": "initialize"
+    },
+    {
+      "key": "resp_create",
+      "path": "executables/nr-gnb.c",
+      "function": "tx_func",
+      "text": "newNotifiedFIFO_elt(sizeof(processingData_L1_t), 0, &gNB->resp_L1, NULL)",
+      "start_offset": 4027,
+      "end_offset": 4099,
+      "line": 110,
+      "group": "operations",
+      "operation": "create",
+      "nullable": true
+    },
+    {
+      "key": "resp_enqueue",
+      "path": "executables/nr-gnb.c",
+      "function": "tx_func",
+      "text": "pushNotifiedFIFO(&gNB->resp_L1, res)",
+      "start_offset": 4311,
+      "end_offset": 4347,
+      "line": 117,
+      "group": "operations",
+      "operation": "enqueue"
+    },
+    {
+      "key": "resp_dequeue",
+      "path": "executables/nr-gnb.c",
+      "function": "L1_rx_thread",
+      "text": "pullNotifiedFIFO(&gNB->resp_L1)",
+      "start_offset": 5599,
+      "end_offset": 5630,
+      "line": 149,
+      "group": "operations",
+      "operation": "dequeue"
+    },
+    {
+      "key": "rx_process",
+      "path": "executables/nr-gnb.c",
+      "function": "L1_rx_thread",
+      "text": "rx_func(info)",
+      "start_offset": 5787,
+      "end_offset": 5800,
+      "line": 154,
+      "group": "processing_calls"
+    },
+    {
+      "key": "resp_destroy",
+      "path": "executables/nr-gnb.c",
+      "function": "L1_rx_thread",
+      "text": "delNotifiedFIFO_elt(res)",
+      "start_offset": 5841,
+      "end_offset": 5865,
+      "line": 156,
+      "group": "operations",
+      "operation": "destroy"
+    },
+    {
+      "key": "completion_create",
+      "path": "executables/nr-gnb.c",
+      "function": "rx_func",
+      "text": "newNotifiedFIFO_elt(sizeof(processingData_L1_t), 0, &gNB->L1_rx_out, NULL)",
+      "start_offset": 8485,
+      "end_offset": 8559,
+      "line": 221,
+      "group": "operations",
+      "operation": "create",
+      "nullable": true
+    },
+    {
+      "key": "completion_enqueue",
+      "path": "executables/nr-gnb.c",
+      "function": "rx_func",
+      "text": "pushNotifiedFIFO(&gNB->L1_rx_out, res)",
+      "start_offset": 8866,
+      "end_offset": 8904,
+      "line": 228,
+      "group": "operations",
+      "operation": "enqueue"
+    },
+    {
+      "key": "completion_dequeue",
+      "path": "executables/nr-ru.c",
+      "function": "wait_free_rx_tti",
+      "text": "pullNotifiedFIFO(L1_rx_out)",
+      "start_offset": 36701,
+      "end_offset": 36728,
+      "line": 960,
+      "group": "operations",
+      "operation": "dequeue"
+    },
+    {
+      "key": "completion_argument",
+      "path": "executables/nr-ru.c",
+      "function": "ru_thread",
+      "text": "wait_free_rx_tti(&gNB->L1_rx_out, rx_tti_busy, proc->frame_rx, proc->tti_rx)",
+      "start_offset": 43617,
+      "end_offset": 43693,
+      "line": 1145,
+      "group": "calls"
+    },
+    {
+      "key": "actor_dequeue",
+      "path": "common/utils/actor/actor.c",
+      "function": "actor_thread",
+      "text": "pullNotifiedFIFO(&actor->fifo)",
+      "start_offset": 1712,
+      "end_offset": 1742,
+      "line": 47,
+      "group": "operations",
+      "operation": "dequeue"
+    },
+    {
+      "key": "actor_callback",
+      "path": "common/utils/actor/actor.c",
+      "function": "actor_thread",
+      "text": "elt->processingFunc(NotifiedFifoData(elt))",
+      "start_offset": 1932,
+      "end_offset": 1974,
+      "line": 54,
+      "group": "processing_calls"
+    },
+    {
+      "key": "actor_response",
+      "path": "common/utils/actor/actor.c",
+      "function": "actor_thread",
+      "text": "pushNotifiedFIFO(elt->reponseFifo, elt)",
+      "start_offset": 2010,
+      "end_offset": 2049,
+      "line": 56,
+      "group": "operations",
+      "operation": "enqueue"
+    },
+    {
+      "key": "publish_inside_lock",
+      "path": "common/utils/threadPool/notified_fifo.h",
+      "function": "pushNotifiedFIFO",
+      "text": "pushNotifiedFIFO_nothreadSafe(nf, msg)",
+      "start_offset": 4933,
+      "end_offset": 4971,
+      "line": 137,
+      "group": "contract"
+    },
+    {
+      "key": "release_after_publish",
+      "path": "common/utils/threadPool/notified_fifo.h",
+      "function": "pushNotifiedFIFO",
+      "text": "mutexunlock(nf->lockF)",
+      "start_offset": 5007,
+      "end_offset": 5029,
+      "line": 140,
+      "group": "contract"
+    },
+    {
+      "key": "remove_inside_lock",
+      "path": "common/utils/threadPool/notified_fifo.h",
+      "function": "pullNotifiedFIFO_nothreadSafe",
+      "text": "nf->outF = nf->outF->next",
+      "start_offset": 5368,
+      "end_offset": 5393,
+      "line": 154,
+      "group": "contract"
+    },
+    {
+      "key": "acquire_return",
+      "path": "common/utils/threadPool/notified_fifo.h",
+      "function": "pullNotifiedFIFO",
+      "text": "return ret",
+      "start_offset": 5734,
+      "end_offset": 5744,
+      "line": 171,
+      "group": "contract"
+    }
+  ],
+  "required_relations": [
+    {
+      "kind": "transfers",
+      "source": "resp_enqueue",
+      "target": "resp_dequeue"
+    },
+    {
+      "kind": "processes",
+      "source": "resp_dequeue",
+      "target": "rx_process"
+    },
+    {
+      "kind": "completion_candidate",
+      "source": "rx_process",
+      "target": "completion_enqueue"
+    },
+    {
+      "kind": "transfers",
+      "source": "completion_enqueue",
+      "target": "completion_dequeue"
+    },
+    {
+      "kind": "processes",
+      "source": "actor_dequeue",
+      "target": "actor_callback"
+    },
+    {
+      "kind": "response_destination",
+      "source": "actor_dequeue",
+      "target": "actor_response"
+    }
+  ]
+}

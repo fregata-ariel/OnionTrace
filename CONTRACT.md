@@ -1,8 +1,14 @@
 # Onion prototype v0.1 internal contract
 
-This prototype uses real execution of a pthread/queue fixture and Clang 18 textual CFG export. It is not an OAI runtime trace and is not the future LibTooling extractor.
+This prototype uses real execution of a pthread/queue fixture and Clang 18 textual CFG export. It is not an OAI runtime trace. M1/T3 adds a separate LibTooling source-extraction boundary; the v0.1 demo retains the textual adapter for comparison.
 
 Python package: `onion`, Python >=3.10, standard library only. JSON schema_version = 1.
+
+M1 adds a separate, versioned execution-structure boundary implemented in
+`onion/execution.py`: [`docs/execution-structure.md`](docs/execution-structure.md).
+It defines scoped identities, typed static relations, per-run evidence and
+cross-run support. Its documents have an explicit `kind` discriminator and do
+not replace or broaden the function-local CFG, Plan, Trace or Core API below.
 
 ## Model
 
@@ -38,3 +44,27 @@ Path enumeration bounded: cycle/path limit must produce `incomplete`, never uniq
 ## CI boundary
 
 Required tests run without OAI data. `scripts/ci.py` always creates fresh session data before discovery and treats any skipped required test as a failure. Optional OAI corpus tests live outside `tests/`.
+
+
+## M1 source extraction boundary
+
+`tools/libtooling` (Clang 18) and `onion/libtooling.py` consume the T2 manifest and
+produce `clang_source_extraction` / `source_extraction_manifest` v1 documents.
+See [docs/libtooling-extractor.md](docs/libtooling-extractor.md) for schema,
+argument adjustments, failure behavior and scoped IDs. These are source CFG and
+call-site records, not runtime evidence or T1 execution_structure documents.
+The adapter preserves uncertainties and exact marker mappings into Model v1.
+
+## M1/T7 region exploration boundary
+
+`onion/integration.py` connects T4–T6 source graphs to T1 structures and the local Core.
+Its workspace, region and reconstruction documents retain scoped references, parent regions,
+plan snapshots and per-run provenance. Trace headers also carry the exact region scope and
+plan-content digest. See [docs/model-integration.md](docs/model-integration.md) for the API,
+observation boundaries and conservative treatment of unresolved asynchronous connections.
+
+## M1/T8 offline structure viewer
+
+`python -m onion.viewer` projects one or more T7 workspaces into a self-contained HTML.
+It preserves typed relations, source evidence, unresolved endpoints and scoped CFG IDs.
+Static resolution creates no runtime evidence. See [docs/structure-viewer.md](docs/structure-viewer.md).

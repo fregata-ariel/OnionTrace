@@ -1,0 +1,226 @@
+{
+  "schema_version": 1,
+  "kind": "oai_thread_source_expectations",
+  "revision": "7fa4d018d4178f9664ea1ca377eca2e822c7a979",
+  "scope": "source-audited expectations for full OAI extraction; not an extracted or executed graph",
+  "sources": [
+    {
+      "path": "common/utils/system.c",
+      "sha256": "sha256:fd3dc6dbd28c84cb7be5aaf5f38e37354d37851bad85fccacfc67f108cbb2ba1",
+      "git_blob": "e38d97768afd46220a60a0618ee174559f43be16",
+      "url": "https://github.com/duranta-project/openairinterface5g/blob/7fa4d018d4178f9664ea1ca377eca2e822c7a979/common/utils/system.c"
+    },
+    {
+      "path": "common/utils/system.h",
+      "sha256": "sha256:c7503796f6df82efcda3b0e9e1ce6d3ebf57e24d3113f7cda980341ee7127832",
+      "git_blob": "2a4b920357fd830332ac65f899b97a70f45ba662",
+      "url": "https://github.com/duranta-project/openairinterface5g/blob/7fa4d018d4178f9664ea1ca377eca2e822c7a979/common/utils/system.h"
+    },
+    {
+      "path": "executables/nr-gnb.c",
+      "sha256": "sha256:c7c488de7b2aeeb3f1e57904d1387f2c43339e1da94cd6c8c7c503bcd183ed7a",
+      "git_blob": "226bf2775bc9895ff5c85772c4ecaa669537803e",
+      "url": "https://github.com/duranta-project/openairinterface5g/blob/7fa4d018d4178f9664ea1ca377eca2e822c7a979/executables/nr-gnb.c"
+    },
+    {
+      "path": "executables/nr-softmodem.c",
+      "sha256": "sha256:91395d14cdd49cef80e4bbb8d52dc86df0754936f33e7ea9e825c2806ee4bee0",
+      "git_blob": "614fecad6267c247d5642abdc5ec653ce7338d49",
+      "url": "https://github.com/duranta-project/openairinterface5g/blob/7fa4d018d4178f9664ea1ca377eca2e822c7a979/executables/nr-softmodem.c"
+    },
+    {
+      "path": "executables/nr-ue.c",
+      "sha256": "sha256:1a8d4d3193fb0b40b764b92373ddf6a9680d2fc2004d49ae30d06e6bfb44b373",
+      "git_blob": "0d1ae421f04e44c31720c891bac5c31e5554e0ce",
+      "url": "https://github.com/duranta-project/openairinterface5g/blob/7fa4d018d4178f9664ea1ca377eca2e822c7a979/executables/nr-ue.c"
+    },
+    {
+      "path": "executables/nr-uesoftmodem.c",
+      "sha256": "sha256:face72a94330cd8f9a2e413c3a8d47735c0acbbe0ca02fd59b805ea56e4afae4",
+      "git_blob": "a0e06850b79adeb302a3817486a9e15a135812ba",
+      "url": "https://github.com/duranta-project/openairinterface5g/blob/7fa4d018d4178f9664ea1ca377eca2e822c7a979/executables/nr-uesoftmodem.c"
+    }
+  ],
+  "paths": [
+    {
+      "target": "nr-softmodem",
+      "start": "L1_rx_thread",
+      "calls": [
+        {
+          "caller": "main",
+          "callee": "init_eNB_afterRU",
+          "site": {
+            "path": "executables/nr-softmodem.c",
+            "start_offset": 22994,
+            "end_offset": 23012,
+            "line": 712,
+            "text": "init_eNB_afterRU()"
+          }
+        },
+        {
+          "caller": "init_eNB_afterRU",
+          "callee": "init_gNB_Tpool",
+          "site": {
+            "path": "executables/nr-gnb.c",
+            "start_offset": 16763,
+            "end_offset": 16783,
+            "line": 404,
+            "text": "init_gNB_Tpool(inst)"
+          }
+        },
+        {
+          "caller": "init_gNB_Tpool",
+          "callee": "threadCreate",
+          "site": {
+            "path": "executables/nr-gnb.c",
+            "start_offset": 14610,
+            "end_offset": 14730,
+            "line": 355,
+            "text": "threadCreate(&gNB->L1_rx_thread, L1_rx_thread, (void *)gNB, \"L1_rx_thread\", gNB->L1_rx_thread_core, OAI_PRIORITY_RT_MAX)"
+          }
+        }
+      ]
+    },
+    {
+      "target": "nr-softmodem",
+      "start": "L1_tx_thread",
+      "calls": [
+        {
+          "caller": "main",
+          "callee": "init_eNB_afterRU",
+          "site": {
+            "path": "executables/nr-softmodem.c",
+            "start_offset": 22994,
+            "end_offset": 23012,
+            "line": 712,
+            "text": "init_eNB_afterRU()"
+          }
+        },
+        {
+          "caller": "init_eNB_afterRU",
+          "callee": "init_gNB_Tpool",
+          "site": {
+            "path": "executables/nr-gnb.c",
+            "start_offset": 16763,
+            "end_offset": 16783,
+            "line": 404,
+            "text": "init_gNB_Tpool(inst)"
+          }
+        },
+        {
+          "caller": "init_gNB_Tpool",
+          "callee": "threadCreate",
+          "site": {
+            "path": "executables/nr-gnb.c",
+            "start_offset": 14847,
+            "end_offset": 14967,
+            "line": 357,
+            "text": "threadCreate(&gNB->L1_tx_thread, L1_tx_thread, (void *)gNB, \"L1_tx_thread\", gNB->L1_tx_thread_core, OAI_PRIORITY_RT_MAX)"
+          }
+        }
+      ]
+    },
+    {
+      "target": "nr-softmodem",
+      "start": "nrL1_stats_thread",
+      "calls": [
+        {
+          "caller": "main",
+          "callee": "init_eNB_afterRU",
+          "site": {
+            "path": "executables/nr-softmodem.c",
+            "start_offset": 22994,
+            "end_offset": 23012,
+            "line": 712,
+            "text": "init_eNB_afterRU()"
+          }
+        },
+        {
+          "caller": "init_eNB_afterRU",
+          "callee": "init_gNB_Tpool",
+          "site": {
+            "path": "executables/nr-gnb.c",
+            "start_offset": 16763,
+            "end_offset": 16783,
+            "line": 404,
+            "text": "init_gNB_Tpool(inst)"
+          }
+        },
+        {
+          "caller": "init_gNB_Tpool",
+          "callee": "threadCreate",
+          "site": {
+            "path": "executables/nr-gnb.c",
+            "start_offset": 15003,
+            "end_offset": 15108,
+            "line": 360,
+            "text": "threadCreate(&proc->L1_stats_thread, nrL1_stats_thread, (void *)gNB, \"L1_stats\", -1, OAI_PRIORITY_RT_LOW)"
+          }
+        }
+      ]
+    },
+    {
+      "target": "nr-uesoftmodem",
+      "start": "UE_thread",
+      "calls": [
+        {
+          "caller": "main",
+          "callee": "init_NR_UE_threads",
+          "site": {
+            "path": "executables/nr-uesoftmodem.c",
+            "start_offset": 16499,
+            "end_offset": 16541,
+            "line": 457,
+            "text": "init_NR_UE_threads(PHY_vars_UE_g[inst][0])"
+          }
+        },
+        {
+          "caller": "init_NR_UE_threads",
+          "callee": "threadCreate",
+          "site": {
+            "path": "executables/nr-ue.c",
+            "start_offset": 46382,
+            "end_offset": 46473,
+            "line": 1094,
+            "text": "threadCreate(&UE->main_thread, UE_thread, (void *)UE, thread_name, -1, OAI_PRIORITY_RT_MAX)"
+          }
+        }
+      ]
+    },
+    {
+      "target": "nr-uesoftmodem",
+      "start": "nrL1_UE_stats_thread",
+      "calls": [
+        {
+          "caller": "main",
+          "callee": "init_NR_UE_threads",
+          "site": {
+            "path": "executables/nr-uesoftmodem.c",
+            "start_offset": 16499,
+            "end_offset": 16541,
+            "line": 457,
+            "text": "init_NR_UE_threads(PHY_vars_UE_g[inst][0])"
+          }
+        },
+        {
+          "caller": "init_NR_UE_threads",
+          "callee": "threadCreate",
+          "site": {
+            "path": "executables/nr-ue.c",
+            "start_offset": 46566,
+            "end_offset": 46660,
+            "line": 1097,
+            "text": "threadCreate(&UE->stat_thread, nrL1_UE_stats_thread, UE, thread_name, -1, OAI_PRIORITY_RT_LOW)"
+          }
+        }
+      ]
+    }
+  ],
+  "api_forwarding": {
+    "path": "common/utils/system.c",
+    "start_offset": 8940,
+    "end_offset": 8977,
+    "line": 283,
+    "text": "pthread_create(t, &attr, func, param)"
+  }
+}

@@ -14,7 +14,7 @@ Linux、Python 3.10以降、Clang 18が必要です。Ubuntu 24.04では次で�
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y clang-18 cmake ninja-build
+sudo apt-get install -y clang-18 libclang-18-dev llvm-18-dev cmake ninja-build
 python3 scripts/ci.py --cc clang-18 --out out
 ```
 
@@ -70,8 +70,11 @@ push（main）、pull request、手動実行でGitHub Actionsが動作します�
 
 | パス | 責務 |
 | --- | --- |
-| `onion/cfg.py` | ClangテキストCFGの構造化。将来LibToolingで置換する境界 |
+| `onion/cfg.py` | 比較用のClangテキストCFG取込 |
+| `tools/libtooling/`, `onion/libtooling.py` | Clang 18の構造化CFG・呼出し抽出、manifest検証と既存Coreへの変換 |
 | `onion/core.py` | 候補経路の再構成、追加地点の推薦、run別根拠の蓄積 |
+| `onion/execution.py` | M1の実行構造・識別子・run証拠のJSON境界と参照検証 |
+| `onion/build_inputs.py` | 固定版OAIの解析入力・CMakeターゲット・コンパイル条件のmanifest |
 | `onion/demo.py` | ビルドから実行・HTML出力までの接続 |
 | `fixture/` | 実スレッド・Queueと明示的な候補プローブ |
 | `viewer/` | 外部依存のないHTML/SVG表示 |
@@ -81,6 +84,36 @@ push（main）、pull request、手動実行でGitHub Actionsが動作します�
 
 設計と制約は[docs/prototype-v0.1.md](docs/prototype-v0.1.md)、JSON境界は[CONTRACT.md](CONTRACT.md)に記載しています。
 
+M1の[実行構造契約](docs/execution-structure.md)では、関数・スレッド役割・論理Queue・callbackと型付き接続を定義しています。
+T4〜T6の静的抽出をT7の接続層で共通構造と関数内探索へつなぎます。固定版OAIの総合検証は#11で扱います。
+
 OAIのCFGは別途取得した場合だけ`python3 -m onion.demo --oai-dump /path/to/cfg --out out`で表示できます。
 外部コーパスの検査は`ONION_OAI_CFG_DIR=/path/to/cfg python3 -m unittest discover -s tests_optional -v`です。
 OAIのソースやCFGダンプは同梱していません。
+
+M1/T2の[解析入力の準備とmanifest](docs/oai-build-inputs.md)では、固定版OAIを独立したcheckoutに
+取得し、SIMU・Clang 18の入力条件、生成ヘッダ、依存、対象・除外・失敗の由来を記録します。
+小規模CMake fixtureは通常CIに含みます。OAI本体の総合検証は[T9の受入手順](docs/oai-acceptance.md)を参照してください。
+
+
+M1/T3の[LibTooling抽出器](docs/libtooling-extractor.md)は、T2のmanifestからコンパイル条件ごとに
+CFG・型・呼出し箇所・マクロ位置を構造化します。未解決呼出しと失敗を保持し、小規模fixtureで
+既存の再構成・推薦との対応を検証します。通常デモのテキスト取込は比較用に継続します。
+
+M1/T4のmainからスレッド開始関数への静的経路抽出は[thread-entrypoints](docs/thread-entrypoints.md)を参照。
+
+M1/T5のActor・task callback登録／投入／実行候補とinline条件・スレッド役割は
+[callback-contexts](docs/callback-contexts.md)を参照。候補・NULL・未解決とQueue別名の不確実性を保持します。
+
+M1/T6のnotifiedFIFOの投入・取得・応答先、論理Queueの基底オブジェクト／引数と
+公開・取得・所有権の境界は[notified-fifo](docs/notified-fifo.md)を参照。
+固定gNB経路のソース根拠と、#11用の実抽出検証gateを含みます。
+
+M1/T7の[実行構造と区間探索の接続](docs/model-integration.md)では、スレッド・Queue・callbackから
+関数内区間を選択し、区間ごとのplan/runと候補の出典を保持します。非同期接続はCFGへ追加せず、
+候補・未解決部分はCoreの不完全性として渡します。
+
+## M1/T8 structure viewer
+
+T7のworkspaceから両main・スレッド・Queue・callbackを段階展開し、関連する関数内CFGを
+オフラインで開けます。[入力・操作・証拠の意味](docs/structure-viewer.md)を参照してください。

@@ -32,7 +32,7 @@ jobs:
       - name: Install native toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang-18 libclang-rt-18-dev cmake ninja-build
+          sudo apt-get install -y --no-install-recommends clang-18 libclang-rt-18-dev libclang-18-dev llvm-18-dev cmake ninja-build
       - name: Build and execute fixture through CMake
         run: |
           cmake -S fixture -B build -G Ninja -DCMAKE_C_COMPILER=clang-18 -DCMAKE_BUILD_TYPE=RelWithDebInfo
@@ -98,7 +98,7 @@ jobs:
       - name: Install fixture compiler and Japanese fonts
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang-18 fonts-noto-cjk
+          sudo apt-get install -y --no-install-recommends clang-18 libclang-18-dev llvm-18-dev cmake ninja-build fonts-noto-cjk
       - name: Install locked development dependencies
         run: npm ci
       - name: Rebuild fixture and generate viewer inputs
@@ -119,3 +119,4 @@ jobs:
             test-results/
           if-no-files-found: error
           retention-days: 14
+

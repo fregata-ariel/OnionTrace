@@ -1,0 +1,218 @@
+"""Build pinned OAI in a fresh workspace and retain every acceptance stage.
+
+Run on an isolated Ubuntu 24.04 runner with the dependencies documented in
+docs/oai-acceptance.md. Never executes the softmodems or accesses RF hardware.
+"""
+import argparse
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+import traceback
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from onion.build_inputs import LOCK, collect, git_provenance, query, file_record, read_json
+from onion.libtooling import extract_manifest, write
+from onion.acceptance import export_acceptance
+from onion.oai_threads import audit_sources as audit_threads, EXPECTATIONS as THREADS
+from onion.oai_callbacks import audit_sources as audit_callbacks, EXPECTATIONS as CALLBACKS
+from onion.oai_queues import audit_sources as audit_queues, EXPECTATIONS as QUEUES
+from scripts.prepare_oai import prepare
+
+
+def run_acceptance(out, tool, *, jobs=2, capture_only=False):
+    out = Path(out).resolve()
+    # A previous success must never survive a failed rerun.
+    out.mkdir(parents=True, exist_ok=False)
+    stages = []
+    result = {'schema_version': 1, 'kind': 'oai_ci_run', 'passed': False,
+              'full_extraction_verified': False, 'runtime_evidence': False,
+              'lock': json.loads(LOCK.read_text()), 'stages': stages,
+              'onion_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
+              'runner': {k: os.environ.get(k) for k in ('GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'ImageOS', 'ImageVersion')}}
+
+    def stage(name, action):
+        row = {'name': name, 'passed': False}
+        stages.append(row)
+        write(out / 'run.json', result)
+        print('START ' + name, flush=True)
+        start = time.monotonic()
+        try:
+            value = action()
+            row['passed'] = True
+            return value
+        except Exception as error:
+            row['failure'] = str(error) or type(error).__name__
+            (out / (name + '-error.log')).write_text(traceback.format_exc())
+            raise
+        finally:
+            row['seconds'] = round(time.monotonic() - start, 2)
+            write(out / 'run.json', result)
+            print('END ' + name + ' ' + str(row), flush=True)
+
+    def command(name, args, cwd=None, env=None):
+        with (out / (name + '.log')).open('w') as log:
+            subprocess.run(args, cwd=cwd, env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
+
+    try:
+        workspace = out / 'workspace'
+        stage('fetch', lambda: prepare(workspace, fetch_only=True))
+        source = workspace / 'source'
+        lock = result['lock']
+        def audit():
+            audits = {name: action(source, json.loads(path.read_text())) for name, action, path in
+                      [('threads', audit_threads, THREADS), ('callbacks', audit_callbacks, CALLBACKS),
+                       ('queues', audit_queues, QUEUES)]}
+            write(out / 'source-audits.json', audits)
+        stage('source-audit', audit)
+        # Tools/dependencies are installed by the workflow from the locked
+        # revisions; verify them again before consuming their installed trees.
+        dependencies = []
+        for dependency in lock['dependency_baseline']:
+            prefix = Path(os.environ.get('ONION_' + dependency['name'].upper(), '/opt/' + dependency['name']))
+            revision = subprocess.check_output(['git', '-C', str(prefix / 'source'), 'rev-parse', 'HEAD'], text=True).strip()
+            if revision != dependency['revision']:
+                raise ValueError('dependency revision mismatch: ' + dependency['name'])
+            dependencies.append({'name': dependency['name'], 'version': revision, 'path': str(prefix)})
+        cache = workspace / 'cpm-cache'
+        environment = dict(os.environ, CPM_SOURCE_CACHE=str(cache))
+        # The prepared checkout stays clean; build directory is ignored by OAI.
+        build = source / 'cmake_targets/oniontrace-analysis/build'
+        query(build)
+        invocation = ['bash', './build_oai', *lock['build_oai_arguments'], '-d', 'oniontrace-analysis', '--build-tool-opt', '-j' + str(jobs)]
+        preparation = json.loads((workspace / 'preparation.json').read_text())
+        preparation.update(fetch_only=False, build_oai_command=invocation)
+        write(workspace / 'preparation.json', preparation)
+        stage('build', lambda: command('build', invocation, source / 'cmake_targets', environment))
+        # build_oai can print success after a failed build; require the native
+        # build tool's successful exit and both produced executables explicitly.
+        def check_build():
+            command('build-check', ['cmake', '--build', str(build), '--target', *lock['targets'], '--parallel', str(jobs)], env=environment)
+            for target in lock['targets']:
+                binary = build / target
+                if not binary.is_file() or not os.access(binary, os.X_OK):
+                    raise ValueError('missing built executable: ' + target)
+            git_provenance(source, lock)
+            result['binaries'] = [file_record(build / target) for target in lock['targets']]
+        stage('build-check', check_build)
+        dependencies.append({'name': 'cpm-cache', 'version': 'actual downloaded CPM/cache contents', 'path': str(cache)})
+        dependency_lock = out / 'dependencies.json'
+        write(dependency_lock, dependencies)
+        scope_path = ROOT / 'config/oai-analysis-scope.json'
+        scope = json.loads(scope_path.read_text())
+        if scope['revision'] != lock['commit']:
+            raise ValueError('analysis scope revision differs from OAI lock')
+        result['analysis_scope'] = scope
+        result['scope_file'] = file_record(scope_path)
+        # Capture and extraction must see exactly the same environment.
+        os.environ['CPM_SOURCE_CACHE'] = str(cache)
+        def capture():
+            manifest = collect(build, lock['targets'], oai=True, dependency_lock=dependency_lock, sources=scope['sources'])
+            for name, value in [('manifest', manifest), ('targets', [e for e in manifest['entries'] if e['status'] == 'validated']),
+                                ('excluded', [e for e in manifest['entries'] if e['status'] == 'excluded']),
+                                ('failures', [e for e in manifest['entries'] if e['status'] == 'failed'])]:
+                write(out / 'inputs' / (name + '.json'), value)
+            if not manifest['ready']:
+                raise ValueError('input capture failed; see inputs/failures.json')
+            return manifest
+        manifest = stage('capture', capture)
+        def extract():
+            extraction = extract_manifest(manifest, tool, out / 'extraction')
+            if not extraction['ready']:
+                raise ValueError('OAI extraction failed; see extraction/failures.json')
+            return extraction
+        extraction = stage('extract', extract)
+        result['extraction_verified'] = True
+        result['captured_inputs'] = [file_record(out / 'inputs/manifest.json'),
+                                     file_record(out / 'extraction/extraction.json')]
+        if capture_only:
+            result['pending_stages'] = ['acceptance']
+            return result
+        def accept():
+            acceptance = export_acceptance(manifest, extraction, out / 'acceptance', oai=True)
+            if not acceptance['passed']:
+                raise ValueError('OAI acceptance failed; see acceptance/failures.json')
+            return acceptance
+        stage('acceptance', accept)
+        result.update(passed=True, full_extraction_verified=True)
+    except Exception as error:
+        result['failure'] = str(error) or type(error).__name__
+    finally:
+        write(out / 'run.json', result)
+        write(out / 'failures.json', [s for s in stages if not s['passed']] +
+              ([{'failure': result['failure']}] if 'failure' in result else []))
+    return result
+
+
+def resume_acceptance(out, *, require_browser=False):
+    """Resume in the same workspace after native evidence has been uploaded."""
+    out = Path(out).resolve()
+    result = json.loads((out / 'run.json').read_text())
+    result.update(passed=False, full_extraction_verified=False,
+                  semantic_acceptance_verified=False, browser_verified=False)
+    row = {'name': 'acceptance', 'passed': False}
+    result['stages'].append(row)
+    write(out / 'run.json', result)
+    start = time.monotonic()
+    print('START acceptance', flush=True)
+    try:
+        if (result.get('kind') != 'oai_ci_run' or not result.get('extraction_verified')
+                or result.get('pending_stages') != ['acceptance']
+                or not result.get('binaries') or not result.get('captured_inputs')
+                or not all(s['passed'] for s in result['stages'][:-1])):
+            raise ValueError('expected a successful capture-only OAI run')
+        if result['onion_commit'] != subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip():
+            raise ValueError('OnionTrace commit changed since native capture')
+        for record in result['captured_inputs'] + result['binaries']:
+            if file_record(record['path']) != record:
+                raise ValueError('captured input or binary changed: ' + record['path'])
+        manifest = read_json(out / 'inputs/manifest.json')
+        extraction = read_json(out / 'extraction/extraction.json')
+        acceptance = export_acceptance(manifest, extraction, out / 'acceptance', oai=True)
+        if not acceptance['passed']:
+            raise ValueError('OAI acceptance failed; see acceptance/failures.json')
+        row['passed'] = True
+        result.update(passed=not require_browser, full_extraction_verified=not require_browser,
+                      semantic_acceptance_verified=True, pending_stages=['browser'] if require_browser else [])
+        if require_browser:
+            result['stages'].append({'name': 'browser', 'passed': False, 'failure': 'browser verification pending'})
+        result.pop('failure', None)
+    except Exception as error:
+        row['failure'] = result['failure'] = str(error) or type(error).__name__
+        (out / 'acceptance-error.log').write_text(traceback.format_exc())
+    finally:
+        row['seconds'] = round(time.monotonic() - start, 2)
+        write(out / 'run.json', result)
+        write(out / 'failures.json', [s for s in result['stages'] if not s['passed']])
+        print('END acceptance ' + str(row), flush=True)
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--tool', type=Path)
+    parser.add_argument('--jobs', type=int, default=2)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--capture-only', action='store_true', help='stop before acceptance; does not mark the run passed')
+    mode.add_argument('--resume-acceptance', action='store_true', help='verify unchanged native evidence and finish acceptance')
+    parser.add_argument('--require-browser', action='store_true', help='keep the resumed run pending until the browser gate completes')
+    args = parser.parse_args()
+    if args.jobs < 1:
+        parser.error('--jobs must be positive')
+    if args.resume_acceptance:
+        result = resume_acceptance(args.out, require_browser=args.require_browser)
+        return 0 if result['passed'] or (args.require_browser and result.get('semantic_acceptance_verified')) else 1
+    if args.require_browser:
+        parser.error('--require-browser requires --resume-acceptance')
+    if args.tool is None:
+        parser.error('--tool is required for build/capture/extraction')
+    result = run_acceptance(args.out, args.tool, jobs=args.jobs, capture_only=args.capture_only)
+    return 0 if result['passed'] or (args.capture_only and result.get('extraction_verified')) else 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "origin": "https://github.com/duranta-project/openairinterface5g.git",
+  "tag": "2026.w07",
+  "commit": "7fa4d018d4178f9664ea1ca377eca2e822c7a979",
+  "targets": [
+    "nr-softmodem",
+    "nr-uesoftmodem"
+  ],
+  "compiler_major": 18,
+  "build_oai_arguments": [
+    "--gNB",
+    "--nrUE",
+    "-w",
+    "SIMU",
+    "--ninja",
+    "--noavx512",
+    "--cmake-opt",
+    "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCCACHE_ACTIVE=OFF -DCMAKE_C_FLAGS='-march=x86-64-v3 -mgfni -mvpclmulqdq' -DCMAKE_CXX_FLAGS='-march=x86-64-v3 -mgfni -mvpclmulqdq'"
+  ],
+  "dependency_baseline": [
+    {
+      "name": "asn1c",
+      "origin": "https://github.com/mouse07410/asn1c",
+      "revision": "940dd5fa9f3917913fd487b13dfddfacd0ded06e"
+    },
+    {
+      "name": "simde",
+      "origin": "https://github.com/simd-everywhere/simde-no-tests.git",
+      "revision": "c7f26b73ba8e874b95c2cec2b497826ad2188f68"
+    }
+  ]
+}

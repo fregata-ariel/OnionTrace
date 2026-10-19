@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.16)
+project(onion_queues C)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+add_executable(nr-softmodem main.c runtime.c review.c)
+add_executable(nr-uesoftmodem ue.c runtime.c)
+add_executable(incompatible incompatible.c)
