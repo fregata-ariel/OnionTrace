@@ -3,7 +3,8 @@
 T7（#9）は、T4/T5/T6の静的中間グラフをT1の`execution_structure`へ変換し、
 スレッド役割、論理Queue、callback、呼出しの参照からT3の関数内CFGを選択する。
 並行構造と非同期受渡しは型付き接続として残し、関数内CFGの辺に追加しない。
-画面の展開はT8、固定版OAIの実抽出・総合検証はT9（#11）が担当する。
+画面の展開は[T8](structure-viewer.md)、固定版OAIの実抽出・総合受入は[T9](oai-acceptance.md)で実装済み。
+導入・実行は[実行マニュアル](runbook.md)、完了時の範囲は[M1受入結果](m1-results.md)を参照。
 
 ## 作成と選択
 

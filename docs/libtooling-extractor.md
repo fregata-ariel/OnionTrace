@@ -108,9 +108,11 @@ calls to runtime evidence.
 - changed inputs, tampered manifests, retained failures/exclusions, unknown flags,
   explicit unsupported assembly, invalid references and missing markers.
 
-Fixed OAI 2026.w07 full-build/corpus acceptance remains #11. No OAI execution,
-optimized-instruction mapping, whole-program points-to analysis or cross-build
-source-position stability is claimed.
+M1 completed real builds of both pinned OAI 2026.w07 targets, extraction of the
+explicit ten-TU audit scope, and semantic/browser acceptance in T9. This is not
+whole-corpus coverage; see [M1 results](m1-results.md) and the [runbook](runbook.md).
+No OAI execution, optimized-instruction mapping, whole-program points-to analysis
+or cross-build source-position stability is claimed.
 
 ## T4 additive fields
 

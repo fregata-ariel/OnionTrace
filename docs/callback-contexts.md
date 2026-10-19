@@ -107,8 +107,8 @@ when read from local storage.
 ```sh
 python -m onion.oai_callbacks --source-root /path/to/pinned/oai \
   --out out/oai-callback-source-audit.json
-python -m onion.oai_callbacks --manifest out/oai/manifest.json \
-  --extraction out/oai/extraction/extraction.json --out out/oai-callback-acceptance.json
+python -m onion.oai_callbacks --manifest out/oai-001/inputs/manifest.json \
+  --extraction out/oai-001/extraction/extraction.json --out out/oai-callback-acceptance.json
 ```
 
 A source audit explicitly reports `full_extraction_verified: false`. The actual
@@ -116,6 +116,7 @@ extraction gate recomputes callback graphs, requires both executable targets,
 and matches semantic records by owner, exact source offsets and dependency hash.
 Missing selected source/plugin TUs remain failures. OAI dynamic coding libraries
 must be included in the captured input closure for LDPC site acceptance; their
-existence in a checkout does not establish executable reachability. Issue #11
-owns full OAI build/input coverage and final acceptance. Source evidence alone
-cannot pass that gate.
+existence in a checkout does not establish executable reachability. T9 completed
+real builds, extraction of the explicit audit scope, and all 13 callback checks;
+see [M1 results](m1-results.md) and the [runbook](runbook.md). Source evidence alone
+cannot pass that gate. Whole-OAI coverage and runtime execution are not claimed.

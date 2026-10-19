@@ -2,7 +2,8 @@
 
 T2 (#4、親 #12) は、後続T3が読む入力と由来の境界を固定する。
 `validated` は実際のコンパイル条件で構文・依存検査を通過した意味であり、CFG抽出や
-OAI実行の成功を意味しない。固定版OAIでの総合受入は #11 で扱う。
+OAI実行の成功を意味しない。固定版OAIの実ビルド・監査対象抽出・総合受入はT9で完了した。
+[実行マニュアル](runbook.md)と[M1受入結果](m1-results.md)を参照。
 
 ## 固定条件と準備
 
@@ -45,6 +46,8 @@ File API queryを**configure前**に置き、build_oaiの`-d oniontrace-analysis
 `preparation.json`に取得条件、実行引数、cwdを保存し、`build.log`にconfigure/buildの出力を保存する。
 失敗時はその場で停止する。`--fetch-only`は取得検証のみでありビルド済みとは扱わない。
 
+一巡実行には[実行マニュアル](runbook.md)の固定依存導入scriptを使う。
+以下は独自環境から低水準CLIを使う場合の依存記録契約である。
 依存のインストールは固定版build_helperの`check_install_oai_software`、
 `install_asn1c_from_source`、`install_simde_from_source`の内容を環境構築者が確認して専用環境で行う。
 自動インストールの実行履歴、OSイメージのdigest、パッケージアーカイブは環境構築側で保存する。
@@ -132,7 +135,7 @@ T9では`capture --source RELATIVE_TU`を繰り返して解析するTUのsubset�
 `context.analysis_scope`に対象sourceのpath/hashを記録し、subset変更はcache_keyを無効にする。
 これは生成物不足や未知の引数を成功扱いする回避策ではなく、総合受入が主張する範囲の指定である。
 
-cache_keyは将来の抽出器へ渡す入力識別子であり、T2はキャッシュ済みの抽出結果を再利用しない。
+cache_keyはLibTooling抽出器と後続モデルへ渡す入力識別子であり、collectorはキャッシュ済みの抽出結果を再利用しない。
 毎回検査して依存を再列挙するため、新たにincludeされたファイルも反映する。
 キーにはsource・cwd・順序付き引数、実コンパイラの版・実体ハッシュ、全依存ファイルのハッシュ、
 ターゲット・compile group、File API reply、CMakeCache、compile DB、CMake configure入力、

@@ -1,6 +1,6 @@
 # M1/T6: notifiedFIFOの静的受渡し候補
 
-親Issue #12、対象Issue #8。T4のmain／スレッド役割とT5のcallback登録に、Queueの初期化・投入・取得・処理・応答先のソース根拠を加える。T7（#9）がT1実行構造／探索器へ変換し、T8（#10）が画面へ接続する。
+親Issue #12、対象Issue #8。T4のmain／スレッド役割とT5のcallback登録に、Queueの初期化・投入・取得・処理・応答先のソース根拠を加える。T7（#9）でT1実行構造／探索器へ変換し、T8（#10）で画面へ接続済み。
 
 ## 入出力
 
@@ -61,7 +61,8 @@ APIはOAIの名前・record tag・引数／戻り型の互換性で認識する�
 
 ## 固定OAIで確認した経路
 
-OAI `2026.w07`、commit `7fa4d018d4178f9664ea1ca377eca2e822c7a979`。`config/oai-queue-sites.json`は4ソースのSHA-256と18地点のbyte範囲・行を固定する。今回のsource auditは成功。実際のOAIビルド／全体抽出受入は#11で行う。
+OAI `2026.w07`、commit `7fa4d018d4178f9664ea1ca377eca2e822c7a979`。`config/oai-queue-sites.json`は4ソースのSHA-256と18地点のbyte範囲・行を固定する。ソース照合に加え、T9で両binaryの実ビルド・監査対象10TUの抽出から、14意味地点・6候補接続を検証した。
+全OAIの解析完了や実行済みの証拠ではない。[M1受入結果](m1-results.md)と[実行マニュアル](runbook.md)を参照。
 
 | ソース | 地点と関係 |
 | --- | --- |
@@ -78,9 +79,9 @@ OAI `2026.w07`、commit `7fa4d018d4178f9664ea1ca377eca2e822c7a979`。`config/oai
 ```bash
 # ソースだけの監査。full_extraction_verifiedは常にfalse
 python3 -m onion.oai_queues --source-root /path/to/pinned-oai --out out/queue-source-audit.json
-# #11用: 実manifestから再計算し、地点・hash・6つの候補接続を検証
-python3 -m onion.oai_queues --manifest out/oai-input/manifest.json \
-  --extraction out/oai-extraction/extraction.json --out out/queue-acceptance.json
+# 実OAIのmanifestから再計算し、地点・hash・6つの候補接続を検証
+python3 -m onion.oai_queues --manifest out/oai-001/inputs/manifest.json \
+  --extraction out/oai-001/extraction/extraction.json --out out/queue-acceptance.json
 ```
 
 総合gateは両実行targetを要求し、nr-softmodem側の固定地点、NULL callback、ソースhash、処理と完了投入までの接続を再計算する。source auditや手書きの構造図だけでは通過しない。通常CIはOAI取得不要で、`fixture/queues`の実ネイティブ抽出を必須テストに含め、`out/queues`へmanifest・抽出・候補グラフ・失敗情報を保存する。
