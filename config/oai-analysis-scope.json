@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "revision": "7fa4d018d4178f9664ea1ca377eca2e822c7a979",
+  "scope": "T9 audited main/thread/callback/queue translation units only; not whole-OAI call resolution",
+  "sources": [
+    "common/utils/actor/actor.c",
+    "common/utils/system.c",
+    "common/utils/threadPool/thread-pool.c",
+    "executables/nr-gnb.c",
+    "executables/nr-ru.c",
+    "executables/nr-softmodem.c",
+    "executables/nr-ue.c",
+    "executables/nr-uesoftmodem.c",
+    "openair1/PHY/CODING/nrLDPC_coding/nrLDPC_coding_segment/nrLDPC_coding_segment_decoder.c",
+    "openair1/PHY/CODING/nrLDPC_coding/nrLDPC_coding_segment/nrLDPC_coding_segment_encoder.c"
+  ]
+}

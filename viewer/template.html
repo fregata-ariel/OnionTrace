@@ -26,9 +26,10 @@
 <section class="panel dynamic-only"><h2>段階をまたぐ蓄積</h2><p class="muted tiny">観測の境界を残して内部の識別点を追加しています。各行は別runです。job番号が同じでも、一つの実行履歴には接合しません。</p><table><thead><tr><th>段階 / run</th><th>内部に追加した地点</th><th>候補が一つのjob</th><th>まだ複数候補</th><th>欠落</th></tr></thead><tbody id="history"></tbody></table><p class="tiny muted" id="cumulative"></p></section>
 <section class="panel"><h2>この試作で確認する範囲</h2><ul id="limits" class="tiny muted"></ul></section><div class="footer">外部通信・外部ライブラリ不要。各段階のplan／trace／analysisは生成先ディレクトリに保存されます。</div>
 </main>
+<script id="onion-data" type="application/json">/*__ONION_DATA__*/null</script>
 <script>
 'use strict';
-const DATA=/*__ONION_DATA__*/null;
+const DATA=JSON.parse(document.getElementById('onion-data').textContent);
 const $=id=>document.getElementById(id),NS='http://www.w3.org/2000/svg';
 const state={stage:0,job:0,cursor:0,mode:'fixture',selected:null,timer:null};
 const statusLabel={unique:'モデル内で1経路',ambiguous:'内部経路が未確定',incomplete:'観測が不完全',inconsistent:'モデルと証跡が不整合'};

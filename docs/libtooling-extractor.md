@@ -29,9 +29,11 @@ reconstruction/recommendation functions, with the same runtime compile command.
 
 One process and a temporary single-entry compile DB are used for **each selected
 compilation**, including multiple entries for the same source. The ordered
-original arguments and tooling arguments, removed output switches, added warning
+original arguments and tooling arguments, removed output/link-only switches, added warning
 policy and builtin-header resource directory are recorded. LibTooling's standard
-syntax-only/output adjusters are also recorded. Semantic `-D`, `-I`, `-include`,
+syntax-only/output adjusters are also recorded. The exact link-only allowlist is
+`-rdynamic` (OAI places it in CFLAGS); its removal is recorded separately in
+`adjustments.removed_link_arguments`. Semantic `-D`, `-I`, `-include`,
 language/target and other flags remain. Response files/plugins are rejected by
 T2. Unknown flags fail, rather than being removed to make extraction succeed.
 

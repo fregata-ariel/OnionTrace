@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 from onion.integration import _seal
-from onion.viewer import project_workspace, export_viewer
+from onion.viewer import project_workspace, export_viewer, _focus_view
 from test_model_integration import workspace, reseal
 
 
@@ -58,8 +58,28 @@ class ViewerTests(unittest.TestCase):
             self.assertNotIn('</script><img src=x>', html)
             self.assertNotIn('<script src=', html)
             self.assertNotIn('<link ', html)
+            self.assertIn('type="application/json"', html)
+            self.assertIn('const DATA=JSON.parse(', html)
             with self.assertRaisesRegex(ValueError, 'duplicate workspace'):
                 export_viewer([w, w], destination)
+
+    def test_display_scope_keeps_full_structure_and_explains_omitted_cfgs(self):
+        w, fid = display_workspace()
+        view = project_workspace(w)
+        other = 'function-outside-display'
+        view['cfgs'][other] = {**copy.deepcopy(view['cfgs'][fid]), 'function': 'unrelated_helper'}
+        view['references'].append({**copy.deepcopy(view['references'][0]), 'function_id': other})
+        snapshot = copy.deepcopy(view)
+        focused = _focus_view(view, ['main'])
+        self.assertEqual(focused['links'], view['links'])
+        self.assertEqual(focused['entities'], view['entities'])
+        self.assertEqual(focused['roots'], view['roots'])
+        self.assertEqual(focused['cfgs'], {fid: view['cfgs'][fid]})
+        self.assertTrue(all(r['function_id'] in focused['cfgs'] for r in focused['references']))
+        self.assertEqual(focused['display_scope']['excluded_functions'],
+                         [{'function_id': other, 'function': 'unrelated_helper'}])
+        self.assertFalse(focused['runtime_evidence'])
+        self.assertEqual(view, snapshot)
 
 
 if __name__ == '__main__':

@@ -376,7 +376,10 @@ public:
       for (auto I = B->succ_begin(); I != B->succ_end(); ++I, ++Ordinal) {
         const CFGBlock *Reachable = I->getReachableBlock();
         const CFGBlock *Possible = I->getPossiblyUnreachableBlock();
-        std::string Kind = Reachable ? "normal" : (Possible ? "unreachable" : "unknown");
+        // A pruned constant branch can have no block at all. The adjacency
+        // tag still proves it unreachable (e.g. a do { ... } while (0) macro).
+        std::string Kind = Reachable ? "normal" :
+          ((!I->isReachable() || Possible) ? "unreachable" : "unknown");
         const CFGBlock *Target = Reachable ? Reachable : Possible;
         Successors.push_back(j::Object{{"ordinal", Ordinal}, {"kind", Kind},
                                       {"target", Target ? j::Value(bid(Target)) : j::Value(nullptr)}});

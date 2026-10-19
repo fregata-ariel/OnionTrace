@@ -9,11 +9,11 @@ import json
 from pathlib import Path
 
 from .build_inputs import digest
-from .callbacks import build_callbacks
+from .callbacks import _callbacks_from_threads
 from .core import accumulate, reconstruct, recommend, _validate
 from .execution import make_entity, make_relation, make_structure, validate_structure
 from .libtooling import build_model, write
-from .queues import build_queues
+from .queues import _queues_from_sources
 from .threads import build_threads, _load
 
 
@@ -28,19 +28,22 @@ def _intact(value, kind):
         raise ValueError('changed or invalid ' + kind)
 
 
-def connect(manifest, extraction, target):
+def connect(manifest, extraction, target, *, max_descendants=10000):
     """Build one target-scoped T1 structure plus navigable source references.
 
     Build identity includes the full manifest; shared TUs are scoped separately
     per executable. Absolute source paths are represented relative to filesystem
     root in T1 identities. Original ranges, guards and ownership stay in sources.
     """
+    if max_descendants < 1:
+        raise ValueError('navigation expansion bound must be positive')
     threads = build_threads(manifest, extraction, [target])
-    callbacks = build_callbacks(manifest, extraction, [target])
-    queues = build_queues(manifest, extraction, [target])
+    callbacks = _callbacks_from_threads(manifest, extraction, threads)
+    queues = _queues_from_sources(manifest, extraction, threads, callbacks)
     rows, _ = _load(manifest, extraction)
     tg, cg, qg = (doc['graphs'][0] for doc in (threads, callbacks, queues))
     entities, relations, references, functions = {}, {}, [], {}
+    reference_ids, references_by_origin = {}, {}
     source = manifest['context']['source']
 
     def entity(kind, identity, label=None):
@@ -73,6 +76,7 @@ def connect(manifest, extraction, target):
                 raise ValueError('duplicate scoped function identity')
             functions[fid] = {'compilation_id': raw['compilation_id'], 'source_function_id': f['id']}
     function_ids = {v['source_function_id']: k for k, v in functions.items()}
+    source_function_ids = {v: k for k, v in function_ids.items()}
     raw_functions = {f['id']: f for f in tg['functions']}
 
     def location(fid, span):
@@ -105,8 +109,12 @@ def connect(manifest, extraction, target):
                    'relation_ids': list(dict.fromkeys(relation_ids)), 'category': category,
                    'source_record': copy.deepcopy(source_record)}
         item = _seal('function_reference', payload)
-        if item not in references:
+        if item['id'] not in reference_ids:
+            reference_ids[item['id']] = item
             references.append(item)
+            references_by_origin.setdefault(origin, []).append(item)
+        elif reference_ids[item['id']] != item:
+            raise ValueError('conflicting function reference identity')
         return item
 
     for row in tg['relations']:
@@ -141,10 +149,9 @@ def connect(manifest, extraction, target):
         rid = relation('invokes', function_ids[invocation['source']], callback_ids.get(row['target']),
                        {**invocation, 'resolution': row['resolution'], 'reason': row.get('reason')}, invocation['source'])
         reference(rid, invocation['source'], [rid], invocation, 'callback_invocation')
-        for ref in list(references):
-            if ref['origin_id'] == callback_ids.get(row['target']):
-                fid = next(k for k, v in function_ids.items() if v == ref['function_id'])
-                reference(rid, fid, [rid, *ref['relation_ids']], row, 'callback_execution_candidate')
+        for ref in list(references_by_origin.get(callback_ids.get(row['target']), [])):
+            fid = source_function_ids[ref['function_id']]
+            reference(rid, fid, [rid, *ref['relation_ids']], row, 'callback_execution_candidate')
     def queue_key(candidate):
         if isinstance(candidate, dict):
             return {k: queue_key(v) for k, v in candidate.items() if k not in ('reason', 'name', 'concrete', 'pointer_field')}
@@ -185,22 +192,21 @@ def connect(manifest, extraction, target):
                 reference(origin, fid, ids, row, 'queue_processing_candidate')
     # Follow synchronous calls beneath a selected thread/Queue/callback origin.
     # Each hop remains a relation reference; asynchronous links never enter CFGs.
-    by_call = {}
+    by_call, calls_by_source = {}, {}
     for row in tg['relations']:
         if row['kind'] == 'calls':
             rid = relation('calls', function_ids[row['source']], function_ids.get(row['target']), row, row['source'])
             by_call[row['id']] = rid
+            calls_by_source.setdefault(row['source'], []).append(row)
     navigation_gaps = []
     seeds = [r for r in references if r['category'] not in ('call_site', 'callee')]
     todo = [(r, [r['function_id']]) for r in seeds]
+    descendants = 0
     while todo:
         ref, stack = todo.pop()
-        if len(references) >= 10000:
-            navigation_gaps.append({'reason': 'navigation reference limit reached'})
-            break
         raw_id = functions[ref['function_id']]['source_function_id']
-        for row in tg['relations']:
-            if row['kind'] != 'calls' or row['source'] != raw_id or row['api']:
+        for row in calls_by_source.get(raw_id, []):
+            if row['api']:
                 continue
             if row['target'] is None:
                 continue
@@ -208,9 +214,18 @@ def connect(manifest, extraction, target):
             if fid in stack or len(stack) >= 128:
                 navigation_gaps.append({'origin_id': ref['origin_id'], 'reason': 'navigation recursion/depth limit'})
                 continue
+            # Inventory references do not consume the expansion budget.
+            if descendants >= max_descendants:
+                navigation_gaps.append({'reason': 'navigation reference limit reached',
+                                        'limit': max_descendants})
+                todo.clear()
+                break
+            # The sealed parent retains the complete entry context once. Copying
+            # that recursively into every descendant grows quadratically.
             record = {'parent_reference_id': ref['id'], 'call_path': [*ref['source_record'].get('call_path', []), row['id']],
-                      'entry_context': ref['source_record'], 'call': row}
+                      'call': row}
             child = reference(ref['origin_id'], row['target'], [*ref['relation_ids'], by_call[row['id']]], record, 'synchronous_descendant')
+            descendants += 1
             todo.append((child, [*stack, fid]))
     structure = make_structure(list(entities.values()), list(relations.values()))
     return _seal('execution_workspace', {'structure': structure, 'build_id': build, 'target': target,

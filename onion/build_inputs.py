@@ -13,6 +13,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,16 +22,96 @@ QUERIES = ("codemodel-v2", "cache-v2", "cmakeFiles-v1", "toolchains-v1")
 ENVIRONMENT = ("PATH", "CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "OBJC_INCLUDE_PATH",
                "SDKROOT", "COMPILER_PATH", "GCC_EXEC_PREFIX", "LIBRARY_PATH", "SOURCE_DATE_EPOCH",
                "CPM_SOURCE_CACHE", "SIMDE_VERSION", "LD_LIBRARY_PATH", "LANG", "LC_ALL")
+# OAI puts this ELF linker switch in CMAKE_C_FLAGS. It has no preprocessing,
+# language, ABI or code-generation effect during a compile-only action.
+LINK_ONLY_ARGUMENTS = ('-rdynamic',)
+
+
+def json_chunks(value, encoder):
+    """Encode bounded subtrees in C while streaming large container boundaries."""
+    def small(item, budget):
+        if isinstance(item, str):
+            return budget - 6 * len(item) - 2
+        if isinstance(item, dict):
+            for key, child in item.items():
+                budget = small(key, budget - 2)
+                if budget < 0:
+                    return budget
+                budget = small(child, budget)
+                if budget < 0:
+                    return budget
+            return budget - 2
+        if isinstance(item, (list, tuple)):
+            for child in item:
+                budget = small(child, budget - 1)
+                if budget < 0:
+                    return budget
+            return budget - 2
+        return budget - 32
+
+    def chunks(item):
+        # Keep CPython's C encoder for bounded subtrees; Python's atom-by-atom
+        # iterencode is prohibitively slow for repeated native CFG documents.
+        if small(item, 256 * 1024) >= 0:
+            yield encoder.encode(item)
+        elif isinstance(item, dict) and all(isinstance(k, str) for k in item):
+            yield '{'
+            for index, key in enumerate(sorted(item) if encoder.sort_keys else item):
+                if index:
+                    yield encoder.item_separator
+                yield encoder.encode(key) + encoder.key_separator
+                yield from chunks(item[key])
+            yield '}'
+        elif isinstance(item, (list, tuple)):
+            yield '['
+            for index, child in enumerate(item):
+                if index:
+                    yield encoder.item_separator
+                yield from chunks(child)
+            yield ']'
+        else:
+            yield encoder.encode(item)
+
+    yield from chunks(value)
 
 
 def digest(value):
-    return "sha256:" + sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
-                                       ensure_ascii=True).encode()).hexdigest()
+    # Preserve canonical bytes without allocating the entire JSON twice.
+    hasher = sha256()
+    parts, size = [], 0
+    encoder = json.JSONEncoder(sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    for part in json_chunks(value, encoder):
+        parts.append(part)
+        size += len(part)
+        if size >= 1024 * 1024:
+            hasher.update(''.join(parts).encode())
+            parts, size = [], 0
+    hasher.update(''.join(parts).encode())
+    return 'sha256:' + hasher.hexdigest()
+
+
+def read_json(path):
+    """Share repeated immutable path/identity strings in large native records."""
+    def share(record):
+        for key, value in record.items():
+            if isinstance(value, str) and len(value) < 1024:
+                record[key] = sys.intern(value)
+            elif isinstance(value, list):
+                for index, item in enumerate(value):
+                    if isinstance(item, str) and len(item) < 1024:
+                        value[index] = sys.intern(item)
+        return record
+    with Path(path).open() as stream:
+        return json.load(stream, object_hook=share)
 
 
 def file_record(path):
     path = Path(path).resolve()
-    return {"path": str(path), "sha256": "sha256:" + sha256(path.read_bytes()).hexdigest()}
+    hasher = sha256()
+    with path.open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            hasher.update(block)
+    return {"path": str(path), "sha256": "sha256:" + hasher.hexdigest()}
 
 
 def run(arguments, cwd=None):
@@ -136,19 +217,35 @@ def output_path(entry, args, directory):
     return absolute(args[positions[0] + 1], directory)
 
 
-def owner_for(entry, args, directory, source, model, build, targets):
-    output = output_path(entry, args, directory)
-    owners = []
+def ownership_index(model, build, targets):
+    """Resolve File API ownership once, rather than scanning large ASN.1 TUs.
+
+    Lists preserve ambiguous prefixes/source memberships so the same invalid
+    compile DB records are rejected by the indexed and direct lookup paths.
+    """
+    index = {}
     for target in targets.values():
-        # File API is the authority for both target build directory and source
-        # membership. The object output disambiguates shared sources/variants.
-        prefix = build / target["paths"]["build"] / "CMakeFiles" / (target["name"] + ".dir")
-        if not output.is_relative_to(prefix.resolve()):
-            continue
-        matching = [s for s in target.get("sources", []) if "compileGroupIndex" in s
-                    and absolute(s["path"], Path(model["paths"]["source"])) == source]
-        if len(matching) == 1:
-            owners.append((target, matching[0]))
+        prefix = (build / target['paths']['build'] / 'CMakeFiles' / (target['name'] + '.dir')).resolve()
+        sources = {}
+        for item in target.get('sources', []):
+            if 'compileGroupIndex' in item:
+                path = absolute(item['path'], Path(model['paths']['source']))
+                sources.setdefault(path, []).append(item)
+        index.setdefault(prefix, []).append((target, sources))
+    return index
+
+
+def owner_for(entry, args, directory, source, model, build, targets, *, index=None):
+    output = output_path(entry, args, directory)
+    index = ownership_index(model, build, targets) if index is None else index
+    owners = []
+    # File API remains the authority. The resolved object-output prefix and
+    # exact source membership disambiguate target variants without basename joins.
+    for prefix in (output, *output.parents):
+        for target, sources in index.get(prefix, []):
+            matching = sources.get(source, [])
+            if len(matching) == 1:
+                owners.append((target, matching[0]))
     if len(owners) != 1:
         raise ValueError("compile DB output/source cannot be matched to one CMake target")
     return owners[0]
@@ -168,8 +265,8 @@ def compiler_record(executable, directory):
 
 
 def validation_args(args):
-    # Only remove compile-output/dependency-output switches. All semantic flags
-    # remain, including unknown ones, so the compiler must diagnose them.
+    # Remove output switches and the exact audited link-only allowlist.
+    # All semantic/unknown flags remain so the compiler must diagnose them.
     result, i = [], 1
     while i < len(args):
         arg = args[i]
@@ -180,7 +277,7 @@ def validation_args(args):
                 raise ValueError(f"missing argument for {arg}")
             i += 2
             continue
-        if arg not in ("-c", "-MD", "-MMD", "-MP"):
+        if arg not in ("-c", "-MD", "-MMD", "-MP", *LINK_ONLY_ARGUMENTS):
             result.append(arg)
         i += 1
     return result
@@ -235,7 +332,15 @@ def validate_entry(args, directory, compiler, source):
             raise ValueError("compiler primary input missing from dependency inventory")
         records = [file_record(path) for path in dependencies]
         main_input = next(row for row in records if row["path"] == str(source))
-        return records, completed.stderr, {"main_input": main_input, "compiler_path": str(actual_compiler)}
+        validation = {"main_input": main_input, "compiler_path": str(actual_compiler),
+                      "removed_link_arguments": [a for a in args[1:] if a in LINK_ONLY_ARGUMENTS]}
+        if any(a in ('-march=native', '-mcpu=native', '-mtune=native') for a in flags):
+            # The original string -march=native alone cannot identify a CPU.
+            # Clang expands it into cc1 target CPU/features without compiling.
+            # No temporary depfile/output arguments enter this stable record.
+            probe = run([compiler['path'], *flags, '-fsyntax-only', '-###'], directory)
+            validation['native_driver_jobs'] = probe.stderr
+        return records, completed.stderr, validation
 
 
 def git_provenance(source, lock):
@@ -276,10 +381,14 @@ def dependency_inventory(lock_path):
     return {"lock": file_record(lock_path), "dependencies": records}
 
 
-def collect(build, names, *, configuration=None, oai=False, dependency_lock=None):
+def collect(build, names, *, configuration=None, oai=False, dependency_lock=None, sources=None):
     build = Path(build).resolve()
     index, model, config, targets, provenance, cache = cmake_model(build, configuration)
     source = Path(model["paths"]["source"]).resolve()
+    requested = None if sources is None else {absolute(str(p), source) for p in sources}
+    if requested is not None:
+        if not requested or any(not p.is_file() or not p.is_relative_to(source) for p in requested):
+            raise ValueError("analysis sources must be a nonempty list of files inside the CMake source tree")
     lock = json.loads(LOCK.read_text())
     if oai and sorted(names) != sorted(lock["targets"]):
         raise ValueError("OAI profile requires the two locked targets")
@@ -297,20 +406,35 @@ def collect(build, names, *, configuration=None, oai=False, dependency_lock=None
         packages = {"format": "dpkg-query name/version/architecture", "listing": listing,
                     "sha256": "sha256:" + sha256(listing.encode()).hexdigest()}
     members = selection(targets, names)
+    ownership = ownership_index(model, build, targets)
     environment = {key: os.environ.get(key) for key in ENVIRONMENT}
     context = {"source": source_info, "cmake": index["cmake"], "configuration": config["name"],
                "environment": environment, "platform": platform.platform(), "inputs": provenance,
                "collector": file_record(Path(__file__)), "cmake_tool": cmake_tool,
                "dependency_inventory": dependencies, "packages": packages}
+    if requested is not None:
+        context['analysis_scope'] = {'kind': 'explicit_source_subset',
+            'sources': [file_record(p) for p in sorted(requested)],
+            'scope': 'only listed TUs are analyzed; other target TUs remain excluded with reasons'}
     cache_context = digest(context)
-    entries, compilers, matched = [], {}, set()
+    entries, compilers, matched, selected_sources = [], {}, set(), set()
+    def exclude(row, reason):
+        # The exact original command remains in raw. Large compile groups are
+        # already retained/hash-verified in the File API provenance; reference
+        # them for unanalyzed entries instead of duplicating them per TU.
+        row.update(status='excluded', reason=reason)
+        row.pop('arguments')
+        row['target'].pop('compile_group')
+        row['target']['compile_group_reference'] = {
+            'json_file': row['target']['json_file'],
+            'index': row['target']['source']['compileGroupIndex']}
     for number, entry in enumerate(json.loads((build / "compile_commands.json").read_text())):
         row = {"index": number, "raw": entry, "status": "failed", "reason": None}
         try:
             args = command(entry)
             directory = Path(entry["directory"]).resolve()
             path = absolute(entry["file"], directory)
-            target, target_source = owner_for(entry, args, directory, path, model, build, targets)
+            target, target_source = owner_for(entry, args, directory, path, model, build, targets, index=ownership)
             matched.add((target["id"], target_source["path"]))
             group = target["compileGroups"][target_source["compileGroupIndex"]]
             row.update(source=str(path), directory=str(directory), arguments=args,
@@ -318,7 +442,12 @@ def collect(build, names, *, configuration=None, oai=False, dependency_lock=None
                                "source": target_source, "compile_group": group},
                        selected_by=members.get(target["id"], []))
             if target["id"] not in members:
-                row.update(status="excluded", reason="outside selected target dependency closure")
+                exclude(row, 'outside selected target dependency closure')
+                entries.append(row)
+                continue
+            selected_sources.add(path)
+            if requested is not None and path not in requested:
+                exclude(row, 'outside explicit analysis source subset; not analyzed')
                 entries.append(row)
                 continue
             if group["language"] not in ("C", "CXX"):
@@ -351,6 +480,10 @@ def collect(build, names, *, configuration=None, oai=False, dependency_lock=None
             if "compileGroupIndex" in item and (key, item["path"]) not in matched:
                 entries.append({"status": "failed", "source": item["path"], "target_id": key,
                                 "reason": "selected CMake translation unit missing from compile DB"})
+    if requested is not None:
+        for path in sorted(requested - selected_sources):
+            entries.append({'status': 'failed', 'source': str(path),
+                            'reason': 'requested analysis source absent from selected target compile DB closure'})
     summary = {status: sum(r["status"] == status for r in entries)
                for status in ("validated", "excluded", "failed")}
     manifest = {"schema_version": 1, "kind": "build_input_manifest", "profile": "oai" if oai else "generic",
@@ -376,6 +509,7 @@ def main():
     capture.add_argument("--profile", choices=("oai", "generic"), default="oai")
     capture.add_argument("--out", required=True, type=Path)
     capture.add_argument("--dependency-lock", type=Path)
+    capture.add_argument("--source", type=Path, action="append", help="Explicit TU subset, relative to CMake source root; repeatable")
     options = parser.parse_args()
     if options.action == "query":
         query(options.build)
@@ -383,7 +517,7 @@ def main():
     options.out.mkdir(parents=True, exist_ok=True)
     try:
         manifest = collect(options.build, options.target, configuration=options.configuration,
-                           oai=options.profile == "oai", dependency_lock=options.dependency_lock)
+                           oai=options.profile == "oai", dependency_lock=options.dependency_lock, sources=options.source)
     except (ValueError, KeyError, OSError, subprocess.SubprocessError) as error:
         manifest = {"schema_version": 1, "kind": "build_input_manifest", "ready": False,
                     "entries": [], "failures": [{"reason": str(error)}]}

@@ -12,7 +12,7 @@ from pathlib import Path
 from .build_inputs import digest
 from .libtooling import write
 from .threads import build_threads, _reachable
-from .callbacks import build_callbacks
+from .callbacks import _callbacks_from_threads
 
 
 CONTRACTS = {
@@ -277,7 +277,13 @@ def _contexts(parent, max_contexts, max_depth):
 
 def build_queues(manifest, extraction, targets=None, *, max_contexts=10000, max_depth=128):
     threads = build_threads(manifest, extraction, targets, max_contexts=max_contexts, max_depth=max_depth)
-    callbacks = build_callbacks(manifest, extraction, targets, max_contexts=max_contexts, max_depth=max_depth)
+    callbacks = _callbacks_from_threads(manifest, extraction, threads, max_contexts=max_contexts, max_depth=max_depth)
+    return _queues_from_sources(manifest, extraction, threads, callbacks,
+                               max_contexts=max_contexts, max_depth=max_depth)
+
+
+def _queues_from_sources(manifest, extraction, threads, callbacks, *, max_contexts=10000, max_depth=128):
+    """Use already derived source graphs; never cache across public calls."""
     graphs = []
     for parent in threads['graphs']:
         functions = {f['id']: f for f in parent['functions']}

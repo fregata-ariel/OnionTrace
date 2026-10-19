@@ -12,16 +12,22 @@ import subprocess
 import tempfile
 
 from .build_inputs import (ENVIRONMENT, command, compiler_record, digest, file_record,
-                           run, validate_entry, validation_args)
+                           run, validate_entry, validation_args, LINK_ONLY_ARGUMENTS, read_json, json_chunks)
 
 
 WARNINGS = ['-Werror=unknown-warning-option', '-Werror=unused-command-line-argument',
             '-Werror=ignored-optimization-argument']
 
 
-def write(path, value):
+def write(path, value, *, compact=False):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2) + '\n')
+    with path.open('w') as stream:
+        if compact:
+            for part in json_chunks(value, json.JSONEncoder(separators=(',', ':'))):
+                stream.write(part)
+        else:
+            json.dump(value, stream, indent=2)
+        stream.write('\n')
 
 
 def _check_manifest(manifest):
@@ -89,6 +95,7 @@ def extract_manifest(manifest, tool, out):
             tooling_args = [args[0], *flags, *additions]
             result.update(original_arguments=args, tooling_arguments=tooling_args,
                           adjustments={'removed': 'compile/dependency output switches only',
+                                       'removed_link_arguments': [a for a in args[1:] if a in LINK_ONLY_ARGUMENTS],
                                        'added': additions, 'tooling': 'ClangTool syntax-only/output adjusters'},
                           validation_diagnostics=diagnostics)
             raw_path = out / f'entry-{ordinal}.json'
@@ -105,7 +112,7 @@ def extract_manifest(manifest, tool, out):
             result.update(log=str(log_path), returncode=completed.returncode)
             if completed.returncode:
                 raise ValueError('LibTooling failed; see entry log')
-            raw = json.loads(raw_path.read_text())
+            raw = read_json(raw_path)
             validate_extraction(raw)
             if raw['compilation_id'] != row['cache_key'] or 'clang version 18.' not in raw['clang_version']:
                 raise ValueError('extractor compilation/version mismatch')

@@ -17,7 +17,7 @@ manifestに記録する。CMake版・OS依存の更新は入力条件の変更�
 
 固定版の [build_oai](https://github.com/duranta-project/openairinterface5g/blob/7fa4d018d4178f9664ea1ca377eca2e822c7a979/cmake_targets/build_oai) と
 [build_helper](https://github.com/duranta-project/openairinterface5g/blob/7fa4d018d4178f9664ea1ca377eca2e822c7a979/cmake_targets/tools/build_helper)
-に従う。`--gNB --nrUE -w SIMU --ninja` を使い、両コンパイラ、
+に従う。`--gNB --nrUE -w SIMU --ninja --noavx512` を使い、両コンパイラ、
 `CMAKE_EXPORT_COMPILE_COMMANDS=ON`、`CMAKE_BUILD_TYPE=RelWithDebInfo` を明示する。
 compiler launcherを介さないよう`CCACHE_ACTIVE=OFF`とし、CPM_SOURCE_CACHEもworkspace内へ分離する。
 `--gNB`はnr-cuupも、SIMUと共通処理はrfsimulator等もビルドするが、解析対象は両softmodemの
@@ -86,9 +86,14 @@ JSON、cwd、ソース所属またはターゲットが不整合なら成功扱�
 | `excluded.json` | 選択ターゲットの依存閉包に属さないエントリと理由 |
 | `failures.json` | 構文エラー、生成物不足、未対応条件、入力不整合と理由・診断 |
 
-エントリはcompile DBの順序・原文・引数配列・cwdを保持する。同一ソースが複数ターゲット・
+エントリはcompile DBの順序・原文・cwdを保持し、解析対象には展開した引数配列も保持する。
+未解析の除外エントリは元コマンドを`raw`に残し、compile groupの重複コピーの代わりに
+`target.compile_group_reference`からhash付きFile API内のgroupを参照する。
+同一ソースが複数ターゲット・
 複数条件でコンパイルされる場合もまとめない。出力オブジェクトのターゲットディレクトリと
 File APIのソース所属・compileGroupIndexを照合する。File APIの対象TUがcompile DBに無い場合も失敗。
+大きなASN.1 targetでも各エントリから全ソースを再走査しないよう、解決済みのobject出力prefixと
+source所属を一度だけ索引化する。重複prefix・重複source所属は複数候補のまま保持し、曖昧な所有を確定しない。
 不明な出力形式、compiler launcher、response file、プラグイン、C/C++以外の言語は黙って通さない。
 現実装の対応範囲はLinuxのCMake Makefiles/Ninjaが出力する`CMakeFiles/<target>.dir`形式。
 別形式・unity build等で照合できない場合は失敗理由を出力する。
@@ -96,8 +101,13 @@ File APIのソース所属・compileGroupIndexを照合する。File APIの対�
 compile DBの実行体とCMakeCacheの言語別コンパイラを実パスで照合し、launcherや不一致は
 genericでも理由付き`failed`とする。他のcompiler familyは主入力を検証できないため未対応とする。
 
-出力・depfile用の`-c/-o/-MD/-MMD/-MP/-MF/-MT/-MQ/-MJ`のみを検査用に差し替え、
-その他の意味を持つ引数は保持する。`-fsyntax-only -MD`でsystem headerを含む依存を取得する。
+出力・depfile用の`-c/-o/-MD/-MMD/-MP/-MF/-MT/-MQ/-MJ`を検査用に差し替える。
+OAIがCFLAGSへ含めるlink専用の`-rdynamic`だけは構文検査・抽出の引数から除き、
+`validation.removed_link_arguments`と抽出側の`adjustments.removed_link_arguments`へ記録する。
+元の引数・compile DB・hashは保持する。これ以外の意味を持つ引数や未知の引数は保持し、
+未知・未使用引数のerror昇格も維持する。`-fsyntax-only -MD`でsystem headerを含む依存を取得する。
+`-march=native`等がある場合は`validation.native_driver_jobs`にClang `-###`の実CPU・feature展開を
+保存する。同じ引数文字列でもhost条件が変わるとcache_keyが変わり、抽出時の再検証でも不一致を拒否する。
 同時にClangの`-MJ`で実際の主入力・cwd・driverを取得し、主入力が1件だけで、
 compile DBの`file`・実行cwd・記録したコンパイラと一致することを検査する。
 主入力そのものが依存一覧に含まれ、その内容のSHA-256を記録できた場合だけ`validated`とする。
@@ -110,6 +120,13 @@ Clangの未知のwarning optionと未使用引数はerrorへ昇格させる。
 configure/File API自体の不備はトップレベルの失敗として記録する。
 
 ## キャッシュ境界
+
+T9では`capture --source RELATIVE_TU`を繰り返して解析するTUのsubsetを明示できる。
+省略時は従来どおり選択targetの全依存閉包を検査する。指定時も全compile DBとCMakeを
+照合してエントリを保持し、subset外は`outside explicit analysis source subset; not analyzed`として除外する。
+指定sourceが選択targetのcompile DB閉包に存在しない場合は失敗する。
+`context.analysis_scope`に対象sourceのpath/hashを記録し、subset変更はcache_keyを無効にする。
+これは生成物不足や未知の引数を成功扱いする回避策ではなく、総合受入が主張する範囲の指定である。
 
 cache_keyは将来の抽出器へ渡す入力識別子であり、T2はキャッシュ済みの抽出結果を再利用しない。
 毎回検査して依存を再列挙するため、新たにincludeされたファイルも反映する。

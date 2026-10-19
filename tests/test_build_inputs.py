@@ -1,4 +1,6 @@
 """Real CMake File API/compile DB regressions; no external OAI checkout."""
+import copy
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -12,8 +14,27 @@ import unittest
 from unittest.mock import patch
 
 from onion.build_inputs import collect, dependency_inventory, git_provenance, query, validation_args
+from onion.build_inputs import cmake_model, ownership_index, owner_for, command, absolute, digest, read_json, file_record
+from onion.libtooling import write
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class JsonProtocolTests(unittest.TestCase):
+    def test_streaming_io_preserves_existing_canonical_ids_and_file_hashes(self):
+        value = {'z': ['日本語', -0.0, True, None], 'a': [{'path': '/same/path', 'text': 'x' * 2048}] * 1024}
+        canonical = json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode()
+        self.assertEqual(digest(value), 'sha256:' + sha256(canonical).hexdigest())
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'large.json'
+            write(path, value)
+            self.assertEqual(read_json(path), value)
+            self.assertEqual(path.read_text(), json.dumps(value, indent=2) + '\n')
+            self.assertEqual(file_record(path)['sha256'], 'sha256:' + sha256(path.read_bytes()).hexdigest())
+            compact = Path(temporary) / 'compact.json'
+            write(compact, value, compact=True)
+            self.assertEqual(read_json(compact), value)
+            self.assertLess(compact.stat().st_size, path.stat().st_size)
 
 
 class BuildInputTests(unittest.TestCase):
@@ -55,6 +76,64 @@ class BuildInputTests(unittest.TestCase):
         self.assertTrue(any(r["source"].endswith("worker.c") for r in manifest["entries"]))
         self.assertEqual(self.capture(), manifest)
 
+    def test_explicit_source_subset_keeps_variants_and_records_unanalyzed_entries(self):
+        whole = self.capture()
+        subset = collect(self.build, ['nr-softmodem', 'nr-uesoftmodem'], sources=['variant.c'])
+        self.assertTrue(subset['ready'], subset)
+        self.assertEqual(subset['summary'], {'validated': 2, 'excluded': 5, 'failed': 0})
+        self.assertEqual(len(subset['entries']), len(whole['entries']))
+        rows = [r for r in subset['entries'] if r['status'] == 'validated']
+        self.assertEqual({r['target']['name'] for r in rows}, {'variant_a', 'variant_b'})
+        self.assertNotEqual(rows[0]['cache_key'], rows[1]['cache_key'])
+        self.assertNotEqual(rows[0]['cache_key'], next(r['cache_key'] for r in whole['entries']
+                                                     if r.get('target') == rows[0]['target']))
+        self.assertEqual(subset['context']['analysis_scope']['kind'], 'explicit_source_subset')
+        self.assertTrue(all('not analyzed' in r['reason'] for r in subset['entries']
+                            if r['status'] == 'excluded' and r['selected_by']))
+        for row in subset['entries']:
+            if row['status'] != 'excluded':
+                continue
+            self.assertIn(row['raw'], [e['raw'] for e in whole['entries']])
+            reference = row['target']['compile_group_reference']
+            target = json.loads(Path(reference['json_file']).read_text())
+            self.assertEqual(reference['index'], row['target']['source']['compileGroupIndex'])
+            self.assertLess(reference['index'], len(target['compileGroups']))
+            if row['selected_by']:
+                self.assertEqual(target['compileGroups'][reference['index']],
+                                 next(e['target']['compile_group'] for e in whole['entries']
+                                      if e['raw'] == row['raw']))
+
+    def test_requested_source_outside_target_closure_or_missing_db_is_failure(self):
+        result = collect(self.build, ['nr-softmodem', 'nr-uesoftmodem'], sources=['unrelated.c'])
+        self.assertFalse(result['ready'])
+        self.assertTrue(any('requested analysis source absent' in r['reason'] for r in result['entries']))
+        self.mutate_db(lambda rows: rows.__setitem__(slice(None), [r for r in rows if not r['file'].endswith('variant.c')]))
+        result = collect(self.build, ['nr-softmodem', 'nr-uesoftmodem'], sources=['variant.c'])
+        self.assertFalse(result['ready'])
+        self.assertTrue(any('missing from compile DB' in r['reason'] for r in result['entries']))
+
+    def test_empty_or_outside_source_subset_is_rejected(self):
+        for sources in ([], ['missing.c'], [ROOT / 'fixture/compilation/main.c']):
+            with self.subTest(sources=sources), self.assertRaisesRegex(ValueError, 'analysis sources'):
+                collect(self.build, ['nr-softmodem'], sources=sources)
+
+    def test_indexed_ownership_rejects_ambiguous_source_membership_and_prefixes(self):
+        _, model, _, targets, _, _ = cmake_model(self.build)
+        row = json.loads(self.db_path.read_text())[0]
+        args, directory = command(row), Path(row['directory'])
+        source = absolute(row['file'], directory)
+        target, item = owner_for(row, args, directory, source, model, self.build, targets,
+                                 index=ownership_index(model, self.build, targets))
+        for kind in ('source', 'prefix'):
+            broken = copy.deepcopy(targets)
+            if kind == 'source':
+                broken[target['id']]['sources'].append(copy.deepcopy(item))
+            else:
+                broken['duplicate-prefix'] = copy.deepcopy(target)
+            with self.subTest(kind=kind), self.assertRaisesRegex(ValueError, 'one CMake target'):
+                owner_for(row, args, directory, source, model, self.build, broken,
+                          index=ownership_index(model, self.build, broken))
+
     def test_generated_and_system_headers_are_hashed(self):
         row = next(r for r in self.capture()["entries"] if r["source"].endswith("shared.c"))
         self.assertTrue(any(d["path"].endswith("generated/config.h") for d in row["dependencies"]))
@@ -71,6 +150,25 @@ class BuildInputTests(unittest.TestCase):
         self.assertTrue(after["ready"])
         self.assertNotEqual(before["manifest_id"], after["manifest_id"])
         self.assertNotEqual(before["entries"][0]["cache_key"], after["entries"][0]["cache_key"])
+
+    def test_native_cpu_expansion_is_recorded_and_invalidates_cache(self):
+        from onion.build_inputs import run as real_run
+        self.configure('-DCMAKE_C_FLAGS=-march=native -mno-avx512f')
+        before = self.capture()
+        self.assertTrue(before['ready'], before)
+        row = next(r for r in before['entries'] if r['status'] == 'validated')
+        self.assertIn('-target-cpu', row['validation']['native_driver_jobs'])
+        self.assertIn('-target-feature', row['validation']['native_driver_jobs'])
+        def changed_cpu(arguments, cwd=None):
+            result = real_run(arguments, cwd)
+            if '-###' in arguments:
+                result.stderr += '\nchanged native CPU feature set\n'
+            return result
+        with patch('onion.build_inputs.run', side_effect=changed_cpu):
+            after = self.capture()
+        self.assertTrue(after['ready'])
+        other = next(r for r in after['entries'] if r['status'] == 'validated')
+        self.assertNotEqual(row['cache_key'], other['cache_key'])
 
     def test_header_content_change_invalidates_cache(self):
         before = self.capture()

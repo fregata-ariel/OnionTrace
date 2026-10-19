@@ -11,6 +11,10 @@ from onion.execution import validate_structure
 from onion.integration import (connect, open_region, initial_plan, reconstruct_region,
     recommend_region, accumulate_regions)
 from onion.libtooling import extract_manifest, build_model
+from onion.viewer import export_viewer
+from onion.threads import build_threads
+from onion.callbacks import build_callbacks, _callbacks_from_threads
+from onion.queues import build_queues, _queues_from_sources
 from test_model_integration import sites, trace
 from test_queues import run, ROOT
 
@@ -73,6 +77,41 @@ class ModelNativeTests(unittest.TestCase):
         self.assertTrue(selected['constraints'])
         self.assertEqual(selected['function_id'], region['function_id'])
         self.assertEqual({e['source'] for e in region['model']['edges']} - {n['id'] for n in region['model']['nodes']}, set())
+        view = export_viewer([w], self.out / 'reconstructed-structure.html')['execution_views'][0]
+        self.assertIn(queue['id'], {r['id'] for r in view['references']})
+        self.assertLessEqual({n['id'] for n in selected['model']['nodes']},
+                             {n['id'] for n in view['cfgs'][selected['function_id']]['nodes']})
+        self.assertFalse(view['runtime_evidence'])
+
+    def test_workspace_graph_reuse_preserves_standalone_results_and_input_graphs(self):
+        targets = ['integration_fixture']
+        threads = build_threads(self.manifest, self.extraction, targets)
+        snapshot = copy.deepcopy(threads)
+        callbacks = _callbacks_from_threads(self.manifest, self.extraction, threads)
+        self.assertEqual(callbacks, build_callbacks(self.manifest, self.extraction, targets))
+        callback_snapshot = copy.deepcopy(callbacks)
+        queues = _queues_from_sources(self.manifest, self.extraction, threads, callbacks)
+        self.assertEqual(queues, build_queues(self.manifest, self.extraction, targets))
+        self.assertEqual(threads, snapshot)
+        self.assertEqual(callbacks, callback_snapshot)
+        self.assertEqual(self.workspace['sources'], {'threads': threads, 'callbacks': callbacks, 'queues': queues})
+
+    def test_navigation_budget_counts_expansion_and_preserves_parent_evidence(self):
+        by_id = {r['id']: r for r in self.workspace['references']}
+        descendants = [r for r in by_id.values() if r['category'] == 'synchronous_descendant']
+        self.assertTrue(descendants)
+        for child in descendants:
+            record = child['source_record']
+            parent = by_id[record['parent_reference_id']]
+            self.assertEqual(parent['origin_id'], child['origin_id'])
+            self.assertEqual(record['call_path'][:-1], parent['source_record'].get('call_path', []))
+            self.assertTrue(set(parent['relation_ids']) <= set(child['relation_ids']))
+            self.assertNotIn('entry_context', record)
+        bounded = connect(self.manifest, self.extraction, 'integration_fixture', max_descendants=1)
+        self.assertEqual(sum(r['category'] == 'synchronous_descendant' for r in bounded['references']), 1)
+        self.assertTrue(any(g.get('limit') == 1 for g in bounded['incompleteness']))
+        with self.assertRaisesRegex(ValueError, 'bound must be positive'):
+            connect(self.manifest, self.extraction, 'integration_fixture', max_descendants=0)
 
     def test_child_interval_build_isolation_and_serialization(self):
         ref = self.ref('callee')
