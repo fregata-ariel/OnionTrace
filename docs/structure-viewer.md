@@ -7,11 +7,13 @@ T7の`execution_workspace`をそのまま入力に取り、main → 初期化呼
 
 ```bash
 python3 -m onion.viewer \
-  --workspace out/gnb/workspace.json --workspace out/ue/workspace.json \
+  --workspace out/structure-viewer/nr-softmodem.json \
+  --workspace out/structure-viewer/nr-uesoftmodem.json \
   --session out/session.json --out out/structure.html
 ```
 
-`--workspace`は繰り返し指定可能。各targetのworkspaceはT7 CLIで作る。
+上は`scripts/ci.py`で生成したfixtureのworkspaceを使う例。`--workspace`は繰り返し指定可能。
+独自workspaceはT7 CLIで作る。導入と生成手順は[実行マニュアル](runbook.md)を参照。
 `--session`は従来のpthread fixture時間軸を同じHTMLへ含める任意指定で、
 省略すれば構造だけのHTMLになる。生成物はCSS・JavaScript・データを含み、
 `file://`で開ける。ネットワーク、外部ライブラリ、サーバーは不要。
@@ -37,7 +39,8 @@ python3 -m onion.viewer \
 
 ## 大きな構造と検証
 
-初期表示はmainのみ。一枝とCFG参照候補は16件ずつ、深さ24、表示要素240までとし、
+初期表示はmainのみ。一枝の接続は前／次ページで16件ずつ切り替える。
+CFG参照候補も16件ずつ追加表示する。深さ24、表示要素240までとし、
 循環参照はその枝で再展開を止める。折り畳むと他の枝を開ける。
 CFGは選択した一関数を60blockずつ表示し、残数と追加表示ボタンを出す。
 表示されていない接続・block・未解決successorはデータから削除しない。
@@ -50,4 +53,7 @@ OAIの実行記録ではなく、thread APIは抽出用stubである。
 `out/structure-only.html`は構造のみ。元workspace・manifest・抽出物も保存する。
 ブラウザテストは両mainからthread/Queue/CFG、callbackと未解決表示、
 選択復元、キーボード操作、390px幅、オフラインを検証する。
-固定OAI両targetの実ビルド抽出と総合受入はT9（#11）で行う。
+固定OAI両targetの実ビルド抽出・総合受入もT9で完了した。
+OAIのHTMLは監査対象関数のCFGに絞り、`display_scope`に表示範囲を記録する。
+全構造の関係と全抽出関数のCFGはworkspace/native JSONに保持する。
+検証した両mainからthread・Queueへの5操作と範囲は[M1受入結果](m1-results.md)を参照。

@@ -1,6 +1,7 @@
 # M1/T9: CIと固定版OAIの総合受入
 
-T9 (#11、親 #12) はT3〜T8を一巡させる。通常の必須CIは小さなfixtureだけを
+T9 (#11、親 #12) はT3〜T8を一巡させる。M1の受入は完了し、mainへ統合済み。
+操作手順は[実行マニュアル](runbook.md)、完了時の範囲・証拠は[M1受入結果](m1-results.md)を参照する。通常の必須CIは小さなfixtureだけを
 使い、OAIの取得・USRP・RFドライバ・実softmodemの実行に依存しない。
 `scripts/ci.py`はskipを失敗とし、既存のwrapper、callback/inline、Queueの別名・応答、
 未解決・入力変更の回帰に加えて、両main → thread/Queue/callback → CFG → HTMLを
@@ -11,8 +12,8 @@ fixtureの合格をOAIの合格とは扱わない。
 ## 固定OAI workflow
 
 GitHub Actionsの **OAI pinned acceptance** (`.github/workflows/oai.yml`) を
-`workflow_dispatch`で対象refを選んで実行する。workflowが既定ブランチへ統合された後に
-Actionsの手動実行一覧から利用できる。workflow/実行driver自体を変更するPRでも
+`workflow_dispatch`で対象refを選んで実行する。mainへ統合済みで、Actionsの手動実行一覧から
+利用できる。workflow/実行driver自体を変更する指定ファイルのPRでも
 別workflowとして実行し、通常の5必須ジョブからは分離する。
 Ubuntu 24.04の使い捨てrunner、Python 3.12、Clang/LLVM 18、CMake/Ninjaを使う。
 ネットワーク、約14GB以上の空き容量、最大180分が必要。
@@ -84,20 +85,26 @@ Clangが到達不能と記録した空の後続先は、
 
 ## ローカルでの再実行
 
-Ubuntu 24.04へworkflowと同じOS依存を用意してから、リポジトリのrootで実行する。
-依存prefix・出力先はいずれも新しいパスを使う。
+Ubuntu 24.04の専用環境を使う。OS依存、LibToolingのビルド、固定ASN.1/SIMDeの導入と
+shellへのexportは[実行マニュアル](runbook.md)の「固定OAIの総合受入を実行する」に記載する。
+依存導入scriptはActionsでは`GITHUB_ENV`へ値を出すが、ローカルの親shellは変更しない。
+Node.js 24/npm・Chromiumも導入した上で、まだ存在しない出力先から次の順に実行する。
 
 ```sh
-python scripts/install_oai_dependencies.py --prefix out/deps-001 --jobs 2
-# environment.jsonの各値を現shellへexportする
-cmake -S tools/libtooling -B build-libtooling -G Ninja \
-  -DLLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm -DClang_DIR=/usr/lib/llvm-18/lib/cmake/clang
-cmake --build build-libtooling --parallel 2
-python scripts/oai_ci.py --out out/oai-001 --tool build-libtooling/onion-extract --jobs 2
+python3 scripts/oai_ci.py --out out/oai-001 --tool build-libtooling/onion-extract --jobs 2 --capture-only
+(
+  ulimit -v 6291456
+  python3 scripts/oai_ci.py --out out/oai-001 --resume-acceptance --require-browser
+)
+node scripts/check_oai_browser.cjs out/oai-001
 ```
 
-依存導入scriptはGitHub Actionsでは`GITHUB_ENV`へ環境を出力する。
-他の環境ではenvironment.jsonの各値をそのままexportする。
+capture成功だけでは未完了。`--require-browser`付きresumeは意味判定成功後もbrowser待ちで、
+最後のChromium検証が成功して初めて`run.json.passed`がtrueになる。
+分割optionなしの実行はブラウザなしの意味判定で成功し得るため、`passed`だけを総合受入の根拠にしない。
+`semantic_acceptance_verified`・`browser_verified`とbrowser結果も確認する。
+入力を変更した場合は新しい出力先でcaptureからやり直す。
+
 OSパッケージとrunner imageの更新はmanifest・run.jsonに記録する。
 OAI/ASN.1/SIMDeの版と実内容は固定するが、OSパッケージ一覧は再現に必要な記録であり
 完全なコンテナimageやパッケージアーカイブの代替ではない。
@@ -118,6 +125,7 @@ OAI/ASN.1/SIMDeの版と実内容は固定するが、OSパッケージ一覧は
 
 失敗時も`!cancelled()`のArtifact uploadを実行する。取得・依存準備・buildの前で止まった場合、
 後段成果物が無い理由はrun.jsonまたはActionsのstepログで確認する。表示成果物が作れた場合も
-それだけでは総合成功と判断せず、`run.json.passed`と`acceptance.json.full_extraction_verified`を確認する。
-成果物の保存期間は14日。実行結果のURL・commit・成否は#11に記録し、レビュー・`dev/m1`への
-マージ・受入条件確認後に#11を閉じる。M1の`main`への最終統合は#12で管理する。
+それだけでは総合成功と判断せず、`run.json`の`passed`・`semantic_acceptance_verified`・`browser_verified`、
+`acceptance.json.full_extraction_verified`とbrowser結果を確認する。
+成果物の保存期間は14日。M1の#11・#12とMilestoneはクローズ済みで、受入run・commit・成果物は
+[M1受入結果](m1-results.md)に記録している。再実行時は新しいrunのURL・commit・成否を保存する。

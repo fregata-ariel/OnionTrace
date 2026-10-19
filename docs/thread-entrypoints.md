@@ -97,17 +97,20 @@ gNB側のmainには別の関数からの同名呼出しもあるため、mainの
 python -m onion.oai_threads --source-root /absolute/oai/source \
   --out out/threads/oai-source-audit.json
 
-# Issue #11の実ビルド・抽出後に実行する総合受入ゲート。
-python -m onion.oai_threads --manifest out/build-inputs/manifest.json \
-  --threads out/threads/threads.json --out out/threads/oai-acceptance.json
+# 固定OAIの実ビルド・抽出後に、同じmanifestからthread graphを作り検証する。
+python3 -m onion.threads --manifest out/oai-001/inputs/manifest.json \
+  --extraction out/oai-001/extraction/extraction.json --out out/oai-thread-check
+python3 -m onion.oai_threads --manifest out/oai-001/inputs/manifest.json \
+  --threads out/oai-thread-check/threads.json --out out/oai-thread-acceptance.json
 ```
 
 前者は`source_audit_passed: true`と`full_extraction_verified: false`を出す。
 後者はOAI profile・固定revision・全TUの抽出成功を要求し、5経路すべての連続したcallと開始関数、
 実ファイルパス、byte位置、manifestの依存ファイルhashを照合する。不一致・対象経路の途中未解決は失敗する。
 対象5経路の外の再帰・未解決点は消さず、受入結果にも`traversal_complete`を併記する。
-本PRで実施したのは固定ソース照合と通常CIのnative fixture。**固定版OAI全体の実ビルドを用いた
-5経路の抽出と表示を含む総合検証は、親Issueの分担どおり#11で実行する。**
+T4時点のソース照合・native fixtureに加え、T9では固定OAI両binaryの実ビルドと
+監査対象10TUの抽出から5経路を検証した。全OAIの完全解析は主張しない。
+総合受入と表示確認の範囲は[M1受入結果](m1-results.md)、再実行は[実行マニュアル](runbook.md)を参照。
 
 ## 通常CI
 

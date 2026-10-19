@@ -2,118 +2,95 @@
 
 [![CI](https://github.com/fregata-ariel/OnionTrace/actions/workflows/ci.yml/badge.svg)](https://github.com/fregata-ariel/OnionTrace/actions/workflows/ci.yml)
 
-CFGと少数の実行時プローブで、未確定な処理区間を段階的に詳しくする解析ツールの試作です。
-前段階の観測境界を残し、次の計測点を選び、実行証跡を同じ構造に重ねます。
-異なるrunの証拠は出典を残して蓄積し、一回の履歴に接合しません。
+Cプログラムの実行構造を静的に抽出し、mainからスレッド・Queue・callbackと関数内CFGをたどる解析ツールの試作です。
+小規模pthread fixtureでは、少数のプローブで記録したイベントから候補経路を再構成し、次に測る地点を推薦します。
+観測境界と過去の候補を残し、異なるrunの証拠を一回の実行履歴へ接合しません。
 
-現在はpthreadとFIFOを使う小さなCプログラムで検証しています。OAIやUSRPのビルド・実行環境は不要です。
+**M1は完了し、mainへ統合済みです。** 固定OAI `2026.w07` の両softmodemをSIMU条件で実ビルドし、
+監査対象の構造抽出からCFG表示までを検証しています。OAIの構造は静的解析結果であり、OAI本体の実行記録ではありません。
 
-## ローカルで実行する
+## M1でできること
 
-Linux、Python 3.10以降、Clang 18が必要です。Ubuntu 24.04では次で準備できます。
+| 機能 | できること |
+| --- | --- |
+| 解析入力の固定 | compile DBとCMake File APIからtarget・コンパイル条件・依存hashを記録。同一ソースの異なる条件を保持し、対象・除外・失敗を分ける |
+| ソース抽出 | Clang 18 LibToolingで関数内CFG、型、呼出し箇所、成立条件、マクロの展開／記述位置を抽出する |
+| 実行構造の接続 | TU間の直接呼出し、ラッパー経由のスレッド生成、callback／inline、notifiedFIFOの投入・取得・処理・応答候補を接続する |
+| 構造とCFGの閲覧 | 両mainから段階展開し、関連する関数内CFGとソース根拠・未解決理由をオフラインHTMLで確認する |
+| 再構成と探索 | 明示したプローブ・区間・観測契約に対して候補経路を再構成し、追加地点を推薦する。親子区間、plan/run、過去候補の出典を保持する |
+| 検証 | OAI不要のfixture CIと、固定OAIの実ビルド・構造抽出・表示を確認する独立workflowを実行する |
+
+M1の固定OAI受入では、全12,244 compile DBエントリを保持し、**監査対象10翻訳単位**を解析しました。
+thread 5経路・callback 13地点・Queue 6候補接続、全6受入判定・実Chromium 5操作を確認しています。
+通常CIは200テスト（skip 0）・Chromium 16テスト・必須5ジョブが成功しています。
+これは2026-10-19のM1完了時点の実績です。[条件・範囲・証拠](docs/m1-results.md)を参照してください。
+
+## できないこと・M1のスコープ外
+
+- **OAI本体の実行イベント取込や自動計測**：OAIへのプローブ自動挿入、T tracer等との接続、実job IDやpayloadの収集は未実装です。実イベントを使う段階的デモはpthread fixtureです。
+- **静的構造からの実行確認・時間算出**：ソース上の接続を実行済みとは判定しません。OAIの処理時間、純粋なQueue滞留時間、実行時の所有権移動やworker対応は証明しません。
+- **全OAIの完全な解析**：全翻訳単位・全経路・全callbackの解決、完全な関数ポインタ／別名解析は提供しません。未知・NULL・複数候補・探索打切りを保持します。
+- **USRP・リアルタイム性能の検証**：RFドライバ、USRP/UHD/FPGAとの接続、リアルタイム動作や計測負荷の性能保証は対象外です。
+- **ビルドをまたぐ自動的な同一視**：異なるbuild・target・コンパイル条件・runの証拠を自動で同じものとは扱いません。
+
+M1内の制約もあります。主な検証対象はCで、C++の完全な意味解析は提供しません。
+静的CFGの候補は経路の実行可能性の証明ではなく、`resolved`も実行確認ではありません。
+固定OAIのHTMLは監査対象関数のCFGに絞り、全抽出関数の詳細はworkspace/native JSONに残しています。
+全関数のCFGを一度に表示する機能ではありません。区間再構成には明示的なプローブ対応と観測契約が必要です。
+
+## まずfixtureで動かす
+
+Linux、Python 3.10以降、Clang/LLVM 18、CMake/Ninja、C/C++ビルド環境が必要です。
+以下はUbuntu 24.04で、リポジトリのルートから実行する例です。
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y clang-18 libclang-18-dev llvm-18-dev cmake ninja-build
+sudo apt-get install -y python3 git build-essential clang-18 libclang-rt-18-dev \
+  libclang-18-dev llvm-18-dev cmake ninja-build
 python3 scripts/ci.py --cc clang-18 --out out
 ```
 
-このコマンドはCのビルド、Clang CFG抽出、3段階の実行、自動プローブ選定、必須Pythonテストを実行します。
-毎回データを再生成し、skipが一件でもある場合は失敗します。`out`内の固定名の出力は置き換えます。
-実験を残す場合は、`--out runs/experiment-001`のように別ディレクトリを指定してください。
+このコマンドは小規模fixtureをビルド・実行し、構造抽出・再構成・HTML生成と必須Pythonテストを行います。
+**OAIの取得・ビルドやUSRPは不要です。** 再実行では`out`の固定名出力を置き換えるため、
+結果を残すときは`--out out/experiment-001`のように出力先を分けてください。
 
-`out/onion-demo.html`をブラウザで開くと、段階切替、job選択、CFG、イベント再生、推薦理由を確認できます。
-HTMLの閲覧にはサーバやNode.jsは不要です。生成したplan、trace、analysisは`out/stage-N`に保存します。
+| 開くHTML | 内容 |
+| --- | --- |
+| `out/onion-demo.html` | 実pthread fixtureの3段階の計測、job選択、候補経路、イベント再生、追加地点の推薦 |
+| `out/structure-only.html` | 小規模の構造抽出用fixtureから、両main・thread・Queue・callbackとCFGを段階展開 |
+| `out/structure-demo.html` | 同じ構造画面と、別buildのpthread fixture時間軸を切替。証拠は混ぜない |
 
-## テスト
+HTMLはファイルとしてブラウザで開けます。閲覧にサーバやNode.jsは不要です。
+初回取得、成果物だけの閲覧、画面操作、固定OAIの実行、失敗時の確認は **[実行マニュアル](docs/runbook.md)** にまとめています。
+
+## テストとCI
+
+fixtureの生成後、Node.js 24/npmを用意してブラウザも確認できます。
 
 ```bash
-# 結合テストは必要な実行データを自身で生成します。
-python3 -m unittest discover -s tests -v
-
-# CMake経由のビルドとCTest
-cmake -S fixture -B build -G Ninja -DCMAKE_C_COMPILER=clang-18
-cmake --build build
-ctest --test-dir build --output-on-failure
-
-# Node.js 24でDOM・実ブラウザを確認
 npm ci
 npx playwright install --with-deps chromium
 npm test
 ```
 
-`npm test`の前には`python3 scripts/ci.py`を実行してください。通常の表示データと、
-イベント欠落時の推薦を確認する`out/incomplete-demo.html`を生成します。
-独自の出力先を使った場合は、Playwrightへ`ONION_OUTPUT=/absolute/output`を渡せます。
-DOMチェックは`node tests/check_dom.cjs /absolute/output/onion-demo.html /absolute/output/qa-dom`です。
+通常CIはmainへのpush・PR・手動実行で動作し、Python 3.10／3.12／3.14、ASan/UBSan、DOM/Chromiumの5ジョブを実行します。
+skip、欠落、build/planの不一致、探索上限、runの混同などを検証します。
+固定OAIは別の **OAI pinned acceptance** workflowで手動実行でき、通常のfixture CIから分離しています。
+生成HTML・JSON・ログ・ブラウザ結果はActionsのArtifactsへ14日間保存します。
+詳しい実行コマンドと独自出力先の指定は[実行マニュアル](docs/runbook.md)を参照してください。
 
-Python単体テストだけなら`python3 -m unittest discover -s tests -p test_core.py -v`で実行できます。
-実行系のテストは`ONION_CLANG`でコンパイラを選べます。
+## ドキュメントと構成
 
-## CIで確認すること
+入口は[ドキュメント一覧](docs/README.md)です。
 
-push（main）、pull request、手動実行でGitHub Actionsが動作します。
-
-| ジョブ | 確認内容 |
+| 文書 | 読む目的 |
 | --- | --- |
-| Core / Python 3.10, 3.12, 3.14 | Clang 18、CMake/CTest、CFG抽出、3段階の実行、再構成・探索・実行系の必須テスト |
-| C fixture / ASan + UBSan | Queueの周回、最大job数、全プローブ有効時のメモリ・未定義動作検査 |
-| Viewer / Chromium | DOM/SVG、段階切替、job選択、再生、欠落時の推薦、オフライン動作、モバイル幅 |
+| [実行マニュアル](docs/runbook.md) | 導入・fixture・固定OAI・画面操作・成果物・トラブル対応 |
+| [M1受入結果](docs/m1-results.md) | 完了時の検証条件・解析範囲・CI・成果物の証拠 |
+| [固定OAI受入の仕様](docs/oai-acceptance.md) | 各判定の意味、分割実行、成功・失敗の読み方 |
+| [JSON契約](CONTRACT.md)／[実行構造モデル](docs/execution-structure.md) | 型付き接続・識別子・証拠の境界 |
+| [構造ビューア](docs/structure-viewer.md)／[再構成への接続](docs/model-integration.md) | 入力・選択保持・区間・不完全性・plan/runの扱い |
 
-欠落、thread内の順序不整合、build/planの取り違え、循環や探索上限、run間の混同を検査します。
-プローブの有効・無効で計算結果が変わらないことと、バッファが小さくても欠落を報告して処理が完了することも確認します。
-
-生成HTML、CFG、各段階のJSON、テストログ、ブラウザのレポート・画像はActionsのArtifactsに14日間保存します。
-失敗時にも利用でき、CIで生成した実動作を手元で確認できます。これらは機能テストで、リアルタイム性能の保証ではありません。
-
-## 構成
-
-| パス | 責務 |
-| --- | --- |
-| `onion/cfg.py` | 比較用のClangテキストCFG取込 |
-| `tools/libtooling/`, `onion/libtooling.py` | Clang 18の構造化CFG・呼出し抽出、manifest検証と既存Coreへの変換 |
-| `onion/core.py` | 候補経路の再構成、追加地点の推薦、run別根拠の蓄積 |
-| `onion/execution.py` | M1の実行構造・識別子・run証拠のJSON境界と参照検証 |
-| `onion/build_inputs.py` | 固定版OAIの解析入力・CMakeターゲット・コンパイル条件のmanifest |
-| `onion/demo.py` | ビルドから実行・HTML出力までの接続 |
-| `fixture/` | 実スレッド・Queueと明示的な候補プローブ |
-| `viewer/` | 外部依存のないHTML/SVG表示 |
-| `scripts/ci.py` | データを再生成し、skipを許さず必須テストを実行 |
-| `tests/` | 必須Pythonテスト、DOM確認、Playwrightテスト |
-| `tests_optional/` | 外部提供のOAIデータを検証する任意テスト |
-
-設計と制約は[docs/prototype-v0.1.md](docs/prototype-v0.1.md)、JSON境界は[CONTRACT.md](CONTRACT.md)に記載しています。
-
-M1の[実行構造契約](docs/execution-structure.md)では、関数・スレッド役割・論理Queue・callbackと型付き接続を定義しています。
-T4〜T6の静的抽出をT7の接続層で共通構造と関数内探索へつなぎます。固定版OAIの総合検証は#11で扱います。
-
-OAIのCFGは別途取得した場合だけ`python3 -m onion.demo --oai-dump /path/to/cfg --out out`で表示できます。
-外部コーパスの検査は`ONION_OAI_CFG_DIR=/path/to/cfg python3 -m unittest discover -s tests_optional -v`です。
-OAIのソースやCFGダンプは同梱していません。
-
-M1/T2の[解析入力の準備とmanifest](docs/oai-build-inputs.md)では、固定版OAIを独立したcheckoutに
-取得し、SIMU・Clang 18の入力条件、生成ヘッダ、依存、対象・除外・失敗の由来を記録します。
-小規模CMake fixtureは通常CIに含みます。OAI本体の総合検証は[T9の受入手順](docs/oai-acceptance.md)を参照してください。
-
-
-M1/T3の[LibTooling抽出器](docs/libtooling-extractor.md)は、T2のmanifestからコンパイル条件ごとに
-CFG・型・呼出し箇所・マクロ位置を構造化します。未解決呼出しと失敗を保持し、小規模fixtureで
-既存の再構成・推薦との対応を検証します。通常デモのテキスト取込は比較用に継続します。
-
-M1/T4のmainからスレッド開始関数への静的経路抽出は[thread-entrypoints](docs/thread-entrypoints.md)を参照。
-
-M1/T5のActor・task callback登録／投入／実行候補とinline条件・スレッド役割は
-[callback-contexts](docs/callback-contexts.md)を参照。候補・NULL・未解決とQueue別名の不確実性を保持します。
-
-M1/T6のnotifiedFIFOの投入・取得・応答先、論理Queueの基底オブジェクト／引数と
-公開・取得・所有権の境界は[notified-fifo](docs/notified-fifo.md)を参照。
-固定gNB経路のソース根拠と、#11用の実抽出検証gateを含みます。
-
-M1/T7の[実行構造と区間探索の接続](docs/model-integration.md)では、スレッド・Queue・callbackから
-関数内区間を選択し、区間ごとのplan/runと候補の出典を保持します。非同期接続はCFGへ追加せず、
-候補・未解決部分はCoreの不完全性として渡します。
-
-## M1/T8 structure viewer
-
-T7のworkspaceから両main・スレッド・Queue・callbackを段階展開し、関連する関数内CFGを
-オフラインで開けます。[入力・操作・証拠の意味](docs/structure-viewer.md)を参照してください。
+主な実装は`onion/`、Clang抽出器は`tools/libtooling/`、表示は`viewer/`、
+fixtureは`fixture/`、検証と実行driverは`scripts/`と`tests/`にあります。
+OAIのソース・ビルド済みbinary・生成CFGは同梱していません。
