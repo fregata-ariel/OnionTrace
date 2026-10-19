@@ -16,7 +16,7 @@
     "--ninja",
     "--noavx512",
     "--cmake-opt",
-    "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCCACHE_ACTIVE=OFF"
+    "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCCACHE_ACTIVE=OFF -DCMAKE_C_FLAGS='-march=x86-64-v3 -mgfni -mvpclmulqdq' -DCMAKE_CXX_FLAGS='-march=x86-64-v3 -mgfni -mvpclmulqdq'"
   ],
   "dependency_baseline": [
     {
